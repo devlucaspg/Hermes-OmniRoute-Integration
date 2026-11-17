@@ -1,0 +1,17 @@
+# Template: replace ALL placeholders and rename to plugin-catalog/omniroute-media.yaml in Hermes PR.
+name: omniroute-media
+repo: https://github.com/YOUR_USER/YOUR_REPO
+sha: REPLACE_WITH_THE_EXACT_40_CHARACTER_COMMIT_SHA
+subdir: backend
+description: Self-hosted OmniRoute image/video, web search/extract, TTS and STT Hermes plugin.
+maintainer: YOUR_GITHUB_USER
+tier: community
+category: general
+version: "0.3.2-beta.1"
+requires_hermes: ">=0.23.2"
+readme: true
+capabilities:
+  provides_tools: []
+  provides_hooks: []
+  provides_middleware: []
+  requires_env: []

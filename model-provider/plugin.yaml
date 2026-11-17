@@ -1,0 +1,17 @@
+name: omniroute-model
+kind: model-provider
+version: "0.3.2-beta.1"
+requires_hermes: ">=0.23.2"
+description: "Native OmniRoute LLM provider with live model discovery and user-configured endpoint"
+author: Community contributors
+license: MIT
+manifest_version: 2
+# Install without prompting for credentials; configure from the Hermes web UI.
+# Secrets stay in Hermes-managed .env, scoped to the selected profile.
+optional_env:
+  - name: OMNIROUTE_BASE_URL
+    description: OmniRoute API endpoint ending in /v1 or /api/v1
+  - name: OMNIROUTE_API_KEY
+    description: OmniRoute inference API key
+    secret: true
+    password: true

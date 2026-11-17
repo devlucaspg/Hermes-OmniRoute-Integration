@@ -1,0 +1,10 @@
+{
+  "name": "omniroute-media",
+  "label": "OmniRoute",
+  "description": "Configure a private OmniRoute API and pick LLM/media models",
+  "icon": "Settings",
+  "version": "0.3.2-beta.1",
+  "tab": {"path": "/omniroute-media", "position": "after:plugins"},
+  "entry": "dist/index.js",
+  "api": "plugin_api.py"
+}

@@ -1,0 +1,126 @@
+# OmniRoute for Hermes — community integration
+
+**Release candidate:** `0.3.2-beta.1` (not yet submitted or accepted by the official Hermes Marketplace).
+
+An original, self-hosted integration connecting the [Hermes Agent](https://github.com/NousResearch/hermes-agent) to any configured [OmniRoute](https://github.com/cheaper-inference/OmniRoute) OpenAI-compatible routing instance.
+
+> Not affiliated with or endorsed by Hermes, Nous Research or OmniRoute. This repository is independently implemented; it does not copy CVlad97's source code.
+
+## Capabilities
+
+| Surface | Component | Endpoint | Notes |
+| --- | --- | --- | --- |
+| LLM chat, tool calling, streaming and vision-capable models | `model-provider/` | `POST /chat/completions` | Native Hermes transport, uses Hermes `model.provider=omniroute`; not a custom chat transport |
+| Live LLM model discovery | `model-provider/` | `GET /models?kind=chat&prefix=alias` | Excludes typed media/embeddings; no hardcoded fallback IDs |
+| Image generation | `backend/` | `POST /images/generations` | Send size only if advertised in pixels (never inject a default); permits models requiring no size |
+| Image editing and references | `backend/` | `POST /images/edits` | Model-specific limits: usually 1, Firefly up to 4, Codex 8 or 16; Hermes safe URL downloads |
+| Video generation | `backend/` | `GET/POST /videos/generations` | Live specialty catalog and per-model metadata; no fixed 10-second dispatch limit; xAI image field corrected |
+| Web search | `backend/` | `POST /search` | Optional fixed search provider; otherwise OmniRoute routes |
+| Web extraction | `backend/` | `POST /web/fetch` | Each URL processed separately; per-URL failure preserved |
+| Text-to-speech | `backend/` | `POST /audio/speech` | MP3/Opus and models discovered via type=audio/subtype=speech |
+| Speech-to-text | `backend/` | `POST /audio/transcriptions` | Multipart; models discovered via type=audio/subtype=transcription |
+| Dashboard | `backend/` | Hermes extension API | Private settings, safe model browsing, selection |
+
+All paths are relative to an **explicit user-configured API root**, such as `https://router.example/api/v1` or `http://127.0.0.1:3000/api/v1`. No real HomeLab host or password is embedded.
+
+## Why there are two plugin manifests
+
+Hermes's `kind: model-provider` is discovered and loaded by its provider registry, while media/web/voice adapters use `kind: backend` and the regular `PluginContext.register_*` registration lifecycle. To avoid patching Hermes core, the repository contains **two deployable catalog components** under distinct subdirectories. One-command local installation installs both; the official Marketplace would show two listings unless Nous approves a different combined packaging mechanism. Do **not** claim native one-click Marketplace installation of both components. A standalone developer installer can install both only after explicit user invocation.
+
+## Local setup for development
+
+Minimum target: **Hermes v0.23.2**, whose released source declares the five required provider registries, `save_url_image`, the provider-profile extension hook and the dashboard plugin loader. Actual loading and end-to-end operation must still be validated in a real installation. On the Hermes machine:
+
+```bash
+python3 scripts/install_local.py
+```
+
+Or install manually from this checkout:
+
+```bash
+hermes plugins install ./model-provider
+hermes plugins install ./backend --enable
+```
+
+Open the **OmniRoute** tab in the authenticated Hermes web dashboard. You can configure the URL, API key, the five model categories, provider-specific TTS voice, optional search/extract provider overrides, and explicitly activate OmniRoute for Hermes chat. Credentials are optional at installation; the tab remains available before you configure them. You can alternatively configure your Hermes profile's environment using Hermes's supported credential editor (not shell history):
+
+- `OMNIROUTE_BASE_URL`: complete OpenAI-compatible API root, including `/v1` or `/api/v1`.
+- `OMNIROUTE_API_KEY`: token authorized for that OmniRoute instance.
+
+For chat, ensure Hermes's native model configuration is set to your active routing endpoint and model:
+
+```bash
+hermes config set model.provider omniroute
+hermes config set model.base_url https://router.example/api/v1
+hermes config set model.default your-model-id
+```
+
+**Important:** selecting a chat model does not change your current Hermes provider. Press **Activate OmniRoute as Hermes chat provider** on the same dashboard tab to explicitly set `model.provider`, `model.base_url`, and `model.default`. If OmniRoute is already the active provider, saving its chat model or endpoint updates the corresponding native keys. A Hermes reload may be necessary. Other model selectors save values to `OMNIROUTE_{IMAGE,VIDEO,TTS,STT}_MODEL`.
+
+Example of backend selection in `~/.hermes/config.yaml` (choose only what your router supports):
+
+```yaml
+image_gen:
+  provider: omniroute
+video_gen:
+  provider: omniroute
+web:
+  search_backend: omniroute
+  extract_backend: omniroute
+tts:
+  provider: omniroute
+stt:
+  provider: omniroute
+```
+
+Optional environment variables, all editable in the Hermes dashboard: `OMNIROUTE_IMAGE_MODEL`, `OMNIROUTE_VIDEO_MODEL`, `OMNIROUTE_TTS_MODEL`, `OMNIROUTE_STT_MODEL`, `OMNIROUTE_TTS_VOICE`, `OMNIROUTE_SEARCH_PROVIDER`, `OMNIROUTE_FETCH_PROVIDER`, `OMNIROUTE_CHAT_MODEL` (dashboard preset only unless native provider active). No default model IDs are fabricated.
+
+## Compatibility with OmniRoute 3.8.53
+
+The v0.3.2-beta.1 adapter is aligned against **OmniRoute tag v3.8.53**. In particular:
+
+- Chat models are discovered with `GET /v1/models?kind=chat&prefix=alias`, then filtered defensively; image/video/audio/embedding entries do not appear in the LLM picker.
+- Audio models use `type: audio` together with `subtype: speech` (TTS) or `subtype: transcription` (STT). This is shared with the dashboard selector.
+- Image generation omits `size` when no pixel dimensions are advertised for that model, since some models reject any explicit size. An explicit caller-provided pixel `size` remains possible.
+- Image editing uses JSON `images` with base64 data URLs, and enforces known provider-specific reference limits before forwarding. OmniRoute makes the final decision for combos and provider capabilities.
+- Image-to-video for xAI uses `image`; other video routes use `image_url`. Video duration is only limited locally by validated model metadata (or a broad operational sanity bound), never a universal ten-second limit. The Hermes dynamic tool schema receives per-model metadata when published by OmniRoute.
+- Key-scoped API rejections remain enforced by OmniRoute. The client preserves status and safe machine-readable error codes, without echoing upstream messages or credentials.
+
+These are **source-contract and offline-test** validations, not a claim of live interoperability with every configured upstream model. Runtime behavior can depend on the OmniRoute instance's keys, providers, flags, and model availability.
+
+## Compatibility caveats
+
+An OmniRoute deployment may support only a subset of these endpoints, and availability depends on its configured upstream providers and credentials. Chat streaming, tool calls and model-dependent vision are delegated to the **native Hermes OpenAI-compatible chat implementation**, not independently reimplemented. OmniRoute supports multimodal requests where the selected upstream model supports them. OmniRoute 3.8.53 exposes `GET /v1/videos/generations` for video model discovery. Older deployments or unconfigured providers may still return an empty list; setting an explicit model ID is supported. Some video capabilities, sizes and durations are per-model and may not be supported by your router; first test with a small request. OmniRoute enforces model/endpoint permission and API-key connection scopes; typed error codes (when safe) and HTTP status are retained. Image editing on OmniRoute 3.8.53 accepts JSON `images: [{image_url: "data:image/...;base64,..."}]` and multipart input. The plugin uses JSON data URLs; model-specific reference limits apply (commonly one, up to sixteen for certain Codex GPT Image models). Live compatibility remains unverified.
+
+The dashboard uses Hermes's extension API and profile-scoped `get_secret_str` plus its native config and credential persistence mechanisms. TTS does not pretend every upstream supports OpenAI stock voices: configure the voice required by your model in the dashboard, if needed. Generated TTS files use the actual MIME/magic format rather than falsely using the requested extension. STT multipart fields and filenames are validated against CR/LF and other control characters. An authenticated dashboard is required. Plain HTTP is accepted only for local or private-network IPs and selected local hostname suffixes (`.home.arpa`, `.local`, `.internal`, localhost). Public endpoints must use HTTPS. HTTP provides no transport confidentiality even on a private LAN.
+
+## Security disclosures (Marketplace policy)
+
+- Makes outbound requests to **only the configured OmniRoute API base** for inference, model catalogs and media/search operations. An operator can point to a third-party HTTPS domain and send data to it; do not use a provider you do not trust.
+- Sends prompts, text to be synthesized, audio recordings, source URLs and optionally image bytes to the configured server. The server may forward those inputs to its own upstream providers.
+- For video reference inputs, only public HTTPS URLs without embedded credentials are accepted (subject to the OmniRoute server's own outbound URL policy). For image editing, it can read explicitly provided local image files (up to 20 MiB), or request a URL through Hermes’s safe image download helper, and send the bytes to OmniRoute. For STT, reads explicitly provided audio files (up to 25 MiB). No general filesystem indexing.
+- Generated media can be stored in Hermes's normal media cache; TTS outputs are written to the requested output path.
+- API key and endpoint are saved through Hermes's own credential/configuration APIs; the dashboard never reveals the key to browser code.
+- On outbound API calls, redirects are refused, preventing a bearer token from being forwarded to a different host via a 30x response. Basic credentials embedded in API URL are rejected.
+- A standalone **developer-initiated** installer runs the `hermes plugins install` subprocess twice. The installed catalog plugins themselves spawn no shell processes and contain no updater.
+- No analytics, telemetry, background daemon, browser scraping, or automatic approval bypasses.
+
+## Development and publication
+
+```bash
+python3 -m unittest discover -s tests -v
+python3 -m compileall -q backend model-provider
+node --check backend/dashboard/dist/index.js
+hermes plugins validate ./model-provider --install-deps
+hermes plugins validate ./backend --install-deps
+```
+
+The first three checks can be run offline. GitHub Actions also invokes the official `NousResearch/hermes-agent/.github/actions/plugin-validate@v0.23.2` composite action for both components; the actual hosted CI result is pending publication. The **last two must run in a real, compatible Hermes installation**, and real OmniRoute integration needs configured credentials and available models. None of these have yet been certified as official or submitted to the catalog.
+
+For publication, create a **public GitHub repository**, replace the placeholders in `catalog/*.yaml.template` with its URL, maintainer name and exact 40-character commit SHA, then submit two files under `NousResearch/hermes-agent/plugin-catalog/` as a PR. Exact SHA pinning and human review are mandatory. The official catalog may request a different packaging arrangement. This candidate declares `requires_hermes: ">=0.23.2"`, a conservative API-level floor checked against the v0.23.2 released source. **Release compatibility remains provisional until the official validator and runtime tests pass**; adjust the floor if those tests find a higher requirement.
+
+See [official submission rules](https://github.com/NousResearch/hermes-agent/blob/main/website/docs/developer-guide/plugins/catalog-submission.md).
+
+## License and credit
+
+MIT license. Original code created from public API contracts and official Hermes plugin extension points. Functionality was compared with [CVlad97/hermes-omniroute-plugin](https://github.com/CVlad97/hermes-omniroute-plugin) to define the feature list, without using or incorporating its code; no license file could be confirmed in that repository when inspected. Apache/MIT origin claims are **not** made for that repository.
