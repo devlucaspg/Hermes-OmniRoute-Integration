@@ -1,6 +1,6 @@
 name: omniroute-media
 kind: backend
-version: "0.3.2-beta.1"
+version: "0.4.0-beta.1"
 requires_hermes: ">=0.23.2"
 description: "Self-hosted OmniRoute: image generation/editing, video, web search/extract, TTS and STT"
 author: Community contributors

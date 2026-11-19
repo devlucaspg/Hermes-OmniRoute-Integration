@@ -1,6 +1,6 @@
 # OmniRoute for Hermes — community integration
 
-**Release candidate:** `0.3.2-beta.1` (not yet submitted or accepted by the official Hermes Marketplace).
+**Release candidate:** `0.4.0-beta.1` (not yet submitted or accepted by the official Hermes Marketplace).
 
 An original, self-hosted integration connecting the [Hermes Agent](https://github.com/NousResearch/hermes-agent) to any configured [OmniRoute](https://github.com/cheaper-inference/OmniRoute) OpenAI-compatible routing instance.
 
@@ -35,12 +35,7 @@ Minimum target: **Hermes v0.23.2**, whose released source declares the five requ
 python3 scripts/install_local.py
 ```
 
-Or install manually from this checkout:
-
-```bash
-hermes plugins install ./model-provider
-hermes plugins install ./backend --enable
-```
+For a GitHub release, install the two components separately from the published repository's Git references (the exact `owner/repo#component` form must be confirmed with the target Hermes version). For a ZIP/local checkout, the developer installer uses `file://...#component` references after staging a local Git repository, because Hermes 0.23.2 does not interpret bare directory paths as local packages. Do not pass `./backend` or `./model-provider` directly to `hermes plugins install` on 0.23.2.
 
 Open the **OmniRoute** tab in the authenticated Hermes web dashboard. You can configure the URL, API key, the five model categories, provider-specific TTS voice, optional search/extract provider overrides, and explicitly activate OmniRoute for Hermes chat. Credentials are optional at installation; the tab remains available before you configure them. You can alternatively configure your Hermes profile's environment using Hermes's supported credential editor (not shell history):
 
@@ -75,9 +70,18 @@ stt:
 
 Optional environment variables, all editable in the Hermes dashboard: `OMNIROUTE_IMAGE_MODEL`, `OMNIROUTE_VIDEO_MODEL`, `OMNIROUTE_TTS_MODEL`, `OMNIROUTE_STT_MODEL`, `OMNIROUTE_TTS_VOICE`, `OMNIROUTE_SEARCH_PROVIDER`, `OMNIROUTE_FETCH_PROVIDER`, `OMNIROUTE_CHAT_MODEL` (dashboard preset only unless native provider active). No default model IDs are fabricated.
 
+
+## Hermes Desktop settings (new in 0.4.0-beta.1)
+
+The release now includes `backend/desktop/plugin.js`, a **native Desktop Settings → Plugins page** for `omniroute-media`. It uses the existing profile-scoped `backend/dashboard/plugin_api.py` through the official `ctx.rest` SDK; **no second credential store**, no direct OmniRoute HTTP calls from the desktop app, and no change to the working chat/media providers. It provides connection configuration, masked API key replacement, live discovery and saving of chat/image/video/TTS/STT models, TTS voice, search/extract overrides and explicit chat activation.
+
+**For a remote Hermes server (CT 221): the Desktop half must be installed on the actual computer running Hermes Desktop.** Installing the backend on CT 221 alone does not copy executable JavaScript to the Windows client. Either install the Desktop target from a published GitHub repository using the Hermes Desktop "Install from Git" interface, or extract this ZIP on the Desktop computer and run `scripts/install_desktop_local.ps1`. The Desktop plugin inventories off by default; enable it in Capabilities → Plugins, then open Settings → Plugins → OmniRoute.
+
+Full directions, safety boundaries, prerequisites, diagnostics and rollback: [docs/DESKTOP.md](docs/DESKTOP.md). **Not yet runtime-tested on your actual Windows Desktop.**
+
 ## Compatibility with OmniRoute 3.8.53
 
-The v0.3.2-beta.1 adapter is aligned against **OmniRoute tag v3.8.53**. In particular:
+The v0.4.0-beta.1 adapter is aligned against **OmniRoute tag v3.8.53**. In particular:
 
 - Chat models are discovered with `GET /v1/models?kind=chat&prefix=alias`, then filtered defensively; image/video/audio/embedding entries do not appear in the LLM picker.
 - Audio models use `type: audio` together with `subtype: speech` (TTS) or `subtype: transcription` (STT). This is shared with the dashboard selector.

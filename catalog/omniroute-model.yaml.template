@@ -7,7 +7,7 @@ description: Native OmniRoute LLM chat provider with live model discovery and co
 maintainer: YOUR_GITHUB_USER
 tier: community
 category: models
-version: "0.3.2-beta.1"
+version: "0.4.0-beta.1"
 requires_hermes: ">=0.23.2"
 readme: true
 capabilities:

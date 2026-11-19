@@ -1,3 +1,12 @@
+## 0.4.0-beta.1 — Native Hermes Desktop settings
+
+- Added a `backend/desktop/plugin.js` half to the existing `omniroute-media` package; it registers a native OmniRoute settings page and uses `ctx.rest` against the existing profile-scoped API.
+- Added a Windows-only local Desktop installer with automatic backup and TXT log, without touching CT221 or OmniRoute.
+- Kept the existing LLM/media Python adapters and dashboard API behavior unchanged.
+- Corrected the local developer installer for Hermes 0.23.2: validate both components, stage a local Git snapshot and use `file://...#component` instead of a bare folder path. GitHub remains the intended distribution mechanism.
+- Added isolated Desktop mock tests, status/activation guards and documentation for remote Hermes backends.
+- Official Desktop SDK validation and live Windows/CT221 runtime tests remain pending.
+
 # Changelog
 
 ## 0.3.2-beta.1 — Hermes dashboard + Marketplace hardening
