@@ -31,11 +31,10 @@ Hermes's `kind: model-provider` is discovered and loaded by its provider registr
 
 Minimum target: **Hermes v0.23.2**, whose released source declares the five required provider registries, `save_url_image`, the provider-profile extension hook and the dashboard plugin loader. Actual loading and end-to-end operation must still be validated in a real installation.
 
-Clone the 0.4 release-candidate branch on the Hermes machine and invoke the installer:
+Clone the current default branch (v0.4.0-beta.1) on the Hermes machine and invoke the installer:
 
 ```bash
-git clone --branch feature/omniroute-desktop-v0.4.0-beta.1 --single-branch \
-  https://github.com/devlucaspg/Hermes-OmniRoute-Integration.git
+git clone https://github.com/devlucaspg/Hermes-OmniRoute-Integration.git
 cd Hermes-OmniRoute-Integration
 python3 scripts/install_local.py
 ```
