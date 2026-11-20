@@ -27,19 +27,24 @@ All paths are relative to an **explicit user-configured API root**, such as `htt
 
 Hermes's `kind: model-provider` is discovered and loaded by its provider registry, while media/web/voice adapters use `kind: backend` and the regular `PluginContext.register_*` registration lifecycle. To avoid patching Hermes core, the repository contains **two deployable catalog components** under distinct subdirectories. One-command local installation installs both; the official Marketplace would show two listings unless Nous approves a different combined packaging mechanism. Do **not** claim native one-click Marketplace installation of both components. A standalone developer installer can install both only after explicit user invocation.
 
-## Local setup for development
+## Install from GitHub
 
 Minimum target: **Hermes v0.23.2**, whose released source declares the five required provider registries, `save_url_image`, the provider-profile extension hook and the dashboard plugin loader. Actual loading and end-to-end operation must still be validated in a real installation. On the Hermes machine:
 
 ```bash
+git clone https://github.com/devlucaspg/Hermes-OmniRoute-Integration.git
+cd Hermes-OmniRoute-Integration
 python3 scripts/install_local.py
 ```
 
-Or install manually from this checkout:
+The installer uses the exact 40-character commit of the local Git checkout and installs both components directly from the public GitHub repository, pinned to that commit. It does not attempt to install a bare local directory path. A Git checkout is required; a ZIP extraction without `.git` cannot determine the commit and will be rejected.
+
+Manual equivalent:
 
 ```bash
-hermes plugins install ./model-provider
-hermes plugins install ./backend --enable
+COMMIT=$(git rev-parse HEAD)
+hermes plugins install "https://github.com/devlucaspg/Hermes-OmniRoute-Integration.git#model-provider" --ref "$COMMIT"
+hermes plugins install "https://github.com/devlucaspg/Hermes-OmniRoute-Integration.git#backend" --ref "$COMMIT" --enable
 ```
 
 Open the **OmniRoute** tab in the authenticated Hermes web dashboard. You can configure the URL, API key, the five model categories, provider-specific TTS voice, optional search/extract provider overrides, and explicitly activate OmniRoute for Hermes chat. Credentials are optional at installation; the tab remains available before you configure them. You can alternatively configure your Hermes profile's environment using Hermes's supported credential editor (not shell history):
