@@ -23,7 +23,32 @@ O código **não** liga diretamente ao OmniRoute do CT222. Ele chama exclusivame
 
 A página é opcional; não altera o comportamento de streaming, chat, áudio, imagem, vídeo ou o fluxo JIT.
 
-## Instalação no HomeLab com o Desktop rodando no Windows
+## Instalação pela interface do Hermes Desktop (Git) — recomendada
+
+Não é necessário clonar o repositório ou executar comandos no terminal:
+
+1. Abra o **Hermes Desktop** e navegue até **Capabilities (Capacidades) → Plugins**.
+2. Clique em **Install from Git** / **Instalar a partir do Git**.
+3. Cole a URL do pacote **OmniRoute Model Provider** e instale:
+
+   ```text
+   https://github.com/devlucaspg/Hermes-OmniRoute-Integration.git#model-provider
+   ```
+
+4. Clique novamente em **Install from Git** e instale o pacote **OmniRoute Media Backend**:
+
+   ```text
+   https://github.com/devlucaspg/Hermes-OmniRoute-Integration.git#backend
+   ```
+
+5. Confirme `omniroute-model` e `omniroute-media` na listagem de plugins; habilite-os e execute **Rescan** se necessário.
+6. Abra **Settings → Plugins → OmniRoute** para configurar a conexão e os modelos, caso a interface do `omniroute-media` tenha sido carregada e habilitada.
+
+**Atenção:** são **dois pacotes instaláveis**. A interface JS está incorporada ao `backend/desktop/plugin.js`. No aplicativo Desktop nativo, o plugin de interface é carregado na máquina onde o aplicativo está instalado. No **Hermes Webapp hospedado**, os plugins de interface são carregados do host que serve o Webapp, não de um cliente Windows separado. Instalar apenas os componentes Python num servidor remoto não instala automaticamente o JS em um Desktop nativo diferente.
+
+O sufixo `#model-provider` ou `#backend` seleciona o subdiretório do repositório. Essas URLs acompanham a `main`; para reproduzir uma versão exata, use um commit/ref suportado pelo gerenciador de plugins do Hermes.
+
+## Alternativa: instalação manual do JavaScript no Windows
 
 1. **Não reinstale o Python que já funciona no CT221.** Preserve os dois plugins do agente e o dashboard web atuais.
 2. Baixe o ZIP `omniroute-hermes-marketplace-v0.4.0-beta.1.zip` no **notebook que executa Hermes Desktop**. Confirme o SHA-256 publicado com o arquivo.
@@ -41,7 +66,7 @@ A página é opcional; não altera o comportamento de streaming, chat, áudio, i
 7. Confira se a interface carrega a URL e o estado da chave sem revelar o valor. Use **Buscar modelos** em `chat` e confirme que a lista corresponde à sua instância OmniRoute. Salve um modelo somente se pretender alterá-lo. A ativação como provedor de chat depende de clique explícito.
 8. Faça um teste simples de leitura do catálogo, depois teste uma mudança não crítica em perfil de laboratório, se disponível. Confirme também que o dashboard web ainda mostra os mesmos valores.
 
-**Distribuição definitiva pelo GitHub:** quando o repositório do plugin for publicado, prefira a função **Install from Git** do Hermes Desktop, com o alvo **Desktop** selecionado; em backend remoto o Hermes não transfere automaticamente o JS do CT221 para o notebook. Confirme as opções da versão instalada e revise o commit/fonte antes de habilitar. Nunca cole uma URL `file://` do CT221 no Windows: ela referencia o filesystem errado. Fonte: https://hermes-agent.nousresearch.com/docs/developer-guide/desktop-plugin-sdk.
+**Prefira a instalação via Git descrita acima.** Na instalação manual, execute o script exclusivamente no computador que roda o Desktop nativo. Verifique os componentes/áreas selecionados na versão instalada, revise a fonte antes de habilitar e não use URLs `file://` de outro CT no Windows. Referência: https://hermes-agent.nousresearch.com/docs/developer-guide/desktop-plugin-sdk.
 
 ## Testes mínimos de homologação
 
