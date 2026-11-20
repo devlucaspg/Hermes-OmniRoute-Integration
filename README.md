@@ -1,5 +1,7 @@
 # OmniRoute for Hermes — community integration
 
+[Leia em Português (Brasil)](README.pt-BR.md)
+
 **Release candidate:** `0.4.0-beta.1` (not yet submitted or accepted by the official Hermes Marketplace).
 
 An original, self-hosted integration connecting the [Hermes Agent](https://github.com/NousResearch/hermes-agent) to any configured [OmniRoute](https://github.com/cheaper-inference/OmniRoute) OpenAI-compatible routing instance.
@@ -30,6 +32,32 @@ Hermes's `kind: model-provider` is discovered and loaded by its provider registr
 ## Install from GitHub
 
 Minimum target: **Hermes v0.23.2**, whose released source declares the five required provider registries, `save_url_image`, the provider-profile extension hook and the dashboard plugin loader. Actual loading and end-to-end operation must still be validated in a real installation.
+
+### Install directly from Hermes Desktop (GUI)
+
+You can install the two packages **without cloning the repository or using a terminal**:
+
+1. Open **Hermes Desktop** and navigate to **Capabilities → Plugins** (the section may be translated as **Capacidades → Plugins**).
+2. Click **Install from Git** (or **Instalar a partir do Git**).
+3. Paste this URL to install the **model provider** package:
+
+   ```text
+   https://github.com/devlucaspg/Hermes-OmniRoute-Integration.git#model-provider
+   ```
+
+4. Repeat **Install from Git** and paste the URL of the **media/backend** package:
+
+   ```text
+   https://github.com/devlucaspg/Hermes-OmniRoute-Integration.git#backend
+   ```
+
+5. Check both `omniroute-model` and `omniroute-media` in **Capabilities → Plugins**, enable them where required and rescan if necessary. For the UI extension, open **Settings → Plugins → OmniRoute** after it is detected and enabled.
+
+These are **two separate installs**, not a single combined Marketplace entry. The `#model-provider` and `#backend` suffixes select different subdirectories of the same public Git repository. The URLs above follow the default `main` branch; pin a supported commit/ref if you need a reproducible version.
+
+**Where the UI lives:** Hermes Desktop (native app) loads its Desktop plugins on the computer running the application. The browser-hosted **Hermes Webapp** loads Desktop plugins on the machine serving the Webapp. Installing agent-side Python packages on a remote host does not by itself install Desktop JavaScript onto a different native Desktop computer.
+
+### Install with the developer script (alternative)
 
 Clone the current default branch (v0.4.0-beta.1) on the Hermes machine and invoke the installer:
 
@@ -79,7 +107,7 @@ Optional environment variables, all editable in the Hermes dashboard: `OMNIROUTE
 
 The release now includes `backend/desktop/plugin.js`, a **native Desktop Settings → Plugins page** for `omniroute-media`. It uses the existing profile-scoped `backend/dashboard/plugin_api.py` through the official `ctx.rest` SDK; **no second credential store**, no direct OmniRoute HTTP calls from the desktop app, and no change to the working chat/media providers. It provides connection configuration, masked API key replacement, live discovery and saving of chat/image/video/TTS/STT models, TTS voice, search/extract overrides and explicit chat activation.
 
-**For a remote Hermes server (CT 221): the Desktop half must be installed on the actual computer running Hermes Desktop.** Installing the backend on CT 221 alone does not copy executable JavaScript to the Windows client. Either install the Desktop target from a published GitHub repository using the Hermes Desktop "Install from Git" interface, or extract this ZIP on the Desktop computer and run `scripts/install_desktop_local.ps1`. The Desktop plugin inventories off by default; enable it in Capabilities → Plugins, then open Settings → Plugins → OmniRoute.
+**For a native Hermes Desktop app connected to a remote server:** install the Desktop half on the computer running Hermes Desktop. Installing the backend on the remote Hermes server alone does not copy JavaScript to a separate Windows client. Use **Capabilities → Plugins → Install from Git** with the two URLs above, or run `scripts/install_desktop_local.ps1` on the Desktop computer if installing the JavaScript locally. **For the browser-hosted Hermes Webapp**, the UI plugin is loaded from the Webapp server's installed plugins instead. Enable/rescan the Desktop plugin in **Capabilities → Plugins**, then open **Settings → Plugins → OmniRoute**.
 
 Full directions, safety boundaries, prerequisites, diagnostics and rollback: [docs/DESKTOP.md](docs/DESKTOP.md). **Not yet runtime-tested on your actual Windows Desktop.**
 
