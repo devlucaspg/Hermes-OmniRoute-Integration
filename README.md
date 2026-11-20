@@ -27,15 +27,20 @@ All paths are relative to an **explicit user-configured API root**, such as `htt
 
 Hermes's `kind: model-provider` is discovered and loaded by its provider registry, while media/web/voice adapters use `kind: backend` and the regular `PluginContext.register_*` registration lifecycle. To avoid patching Hermes core, the repository contains **two deployable catalog components** under distinct subdirectories. One-command local installation installs both; the official Marketplace would show two listings unless Nous approves a different combined packaging mechanism. Do **not** claim native one-click Marketplace installation of both components. A standalone developer installer can install both only after explicit user invocation.
 
-## Local setup for development
+## Install from GitHub
 
-Minimum target: **Hermes v0.23.2**, whose released source declares the five required provider registries, `save_url_image`, the provider-profile extension hook and the dashboard plugin loader. Actual loading and end-to-end operation must still be validated in a real installation. On the Hermes machine:
+Minimum target: **Hermes v0.23.2**, whose released source declares the five required provider registries, `save_url_image`, the provider-profile extension hook and the dashboard plugin loader. Actual loading and end-to-end operation must still be validated in a real installation.
+
+Clone the 0.4 release-candidate branch on the Hermes machine and invoke the installer:
 
 ```bash
+git clone --branch feature/omniroute-desktop-v0.4.0-beta.1 --single-branch \
+  https://github.com/devlucaspg/Hermes-OmniRoute-Integration.git
+cd Hermes-OmniRoute-Integration
 python3 scripts/install_local.py
 ```
 
-For a GitHub release, install the two components separately from the published repository's Git references (the exact `owner/repo#component` form must be confirmed with the target Hermes version). For a ZIP/local checkout, the developer installer uses `file://...#component` references after staging a local Git repository, because Hermes 0.23.2 does not interpret bare directory paths as local packages. Do not pass `./backend` or `./model-provider` directly to `hermes plugins install` on 0.23.2.
+The installer validates both manifests, resolves the exact commit checked out, and installs the two components from `https://github.com/devlucaspg/Hermes-OmniRoute-Integration.git#model-provider` and `#backend` pinned with `--ref <full-commit-SHA>`. It does **not** use bare directory paths or temporary `file://` Git repositories. A Git checkout is required; running it from an extracted ZIP without `.git` fails with an actionable error. The installer does not automatically install the Desktop JavaScript portion on Windows.
 
 Open the **OmniRoute** tab in the authenticated Hermes web dashboard. You can configure the URL, API key, the five model categories, provider-specific TTS voice, optional search/extract provider overrides, and explicitly activate OmniRoute for Hermes chat. Credentials are optional at installation; the tab remains available before you configure them. You can alternatively configure your Hermes profile's environment using Hermes's supported credential editor (not shell history):
 
