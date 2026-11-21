@@ -6,7 +6,7 @@
 
 Integração independente que conecta o [Hermes Agent](https://github.com/NousResearch/hermes-agent) a uma instância [OmniRoute](https://github.com/cheaper-inference/OmniRoute) configurada pelo usuário, por meio de uma API compatível com OpenAI.
 
-> Projeto não afiliado nem endossado por Hermes, Nous Research ou OmniRoute. A implementação é original e não incorpora código-fonte de CVlad97.
+> Projeto não afiliado nem endossado por Hermes, Nous Research ou OmniRoute. A implementação é original.
 
 ## Funcionalidades
 
@@ -182,4 +182,4 @@ Para publicação no catálogo oficial, os dois manifests devem ser apresentados
 
 ## Licença e créditos
 
-Licença MIT. Implementação original baseada em contratos públicos de API e pontos de extensão oficiais do Hermes. As funcionalidades foram comparadas com [CVlad97/hermes-omniroute-plugin](https://github.com/CVlad97/hermes-omniroute-plugin) para definir o escopo, sem incorporar seu código-fonte ou atribuir-lhe uma licença não confirmada.
+Licença MIT. Implementação original baseada em contratos públicos de API e pontos de extensão oficiais do Hermes. 
