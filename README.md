@@ -6,7 +6,7 @@
 
 An original, self-hosted integration connecting the [Hermes Agent](https://github.com/NousResearch/hermes-agent) to any configured [OmniRoute](https://github.com/cheaper-inference/OmniRoute) OpenAI-compatible routing instance.
 
-> Not affiliated with or endorsed by Hermes, Nous Research or OmniRoute. This repository is independently implemented; it does not copy CVlad97's source code.
+> Not affiliated with or endorsed by Hermes, Nous Research or OmniRoute. 
 
 ## Capabilities
 
@@ -159,4 +159,4 @@ See [official submission rules](https://github.com/NousResearch/hermes-agent/blo
 
 ## License and credit
 
-MIT license. Original code created from public API contracts and official Hermes plugin extension points. Functionality was compared with [CVlad97/hermes-omniroute-plugin](https://github.com/CVlad97/hermes-omniroute-plugin) to define the feature list, without using or incorporating its code; no license file could be confirmed in that repository when inspected. Apache/MIT origin claims are **not** made for that repository.
+MIT license. Original code created from public API contracts and official Hermes plugin extension points. 
