@@ -332,12 +332,19 @@ def _filtered_rows(rows: list, filters: DiscoveryFilters, free: dict, rankings: 
         identifier, owner = row.get('id'), row.get('owned_by')
         if not isinstance(identifier, str) or not identifier or len(identifier) > 256:
             continue
-        if not isinstance(owner, str):
-            continue
-        kind = 'chat' if _is_chat(row) else row.get('type')
-        if not isinstance(kind, str) or kind not in kinds:
-            continue
         is_combo = _catalog_module._is_combo(row)
+        owner = owner if isinstance(owner, str) else ('combo' if is_combo else '')
+        raw_kind = row.get('type')
+        if _is_chat(row):
+            kind = 'chat'
+        elif _catalog_module._is_modality(row, 'tts') or _catalog_module._is_modality(row, 'stt'):
+            kind = 'audio'
+        elif isinstance(raw_kind, str) and raw_kind in DISCOVERY_KINDS and raw_kind != 'chat':
+            kind = raw_kind
+        else:
+            continue
+        if kind not in kinds:
+            continue
         if not filters.include_combos and is_combo:
             continue
         flags = row.get('capabilities')
@@ -405,9 +412,9 @@ def discover_models(filters: DiscoveryFilters):
                 if filters.free_only:
                     raise HTTPException(status_code=502, detail='Free catalog unavailable; configure a read token') from None
                 warnings.append('Free catalog unavailable')
-        if token:
+        if token or filters.free_only:
             try:
-                items = _discovery_get(root + '/free-provider-rankings?configuredOnly=true&availableOnly=true&withUsage=true&sortBy=reliability&limit=100', token).get('rankings')
+                items = _discovery_get(root + '/free-provider-rankings?configuredOnly=true&availableOnly=true&withUsage=true&sortBy=reliability&limit=100', management).get('rankings')
                 if not isinstance(items, list):
                     raise ValueError('Invalid rankings')
                 for r in items:
@@ -423,27 +430,31 @@ def discover_models(filters: DiscoveryFilters):
             except (HTTPException, ValueError):
                 warnings.append('Provider rankings unavailable')
             try:
-                data = _discovery_get(root + '/free-tier/summary', token)
+                data = _discovery_get(root + '/free-tier/summary', management)
                 summary = {k: data.get(k) for k in ('modelCount', 'poolCount', 'steadyRecurringTokens',
                                                      'firstMonthRealisticTokens', 'catalogUpdatedAt', 'catalogSource')}
                 # Summary is a global catalog estimate, never an account balance.
                 budgets = data.get('perModel')
-                if isinstance(budgets, list) and free:
+                if not isinstance(budgets, list):
+                    raise HTTPException(status_code=502, detail='Invalid free tier summary')
+                if free:
                     detailed = _free_index(budgets)
                     # Only enrich existing exact matches, never promote an
                     # unknown row based on global or provider-level totals.
                     # The active overlay can retire baseline entries. Do not revive
-                    # an offer missing/disabled in the effective overlay.
+                    # an offer missing/disabled in the effective summary.
                     free = {k: dict(v, **{f: detailed[k][f] for f in
                              ('freeType', 'monthlyTokens', 'creditTokens', 'poolKey', 'tos',
                               'hardStopGuaranteed', 'trainsOnPrompts', 'eligibilityGate')
                              if f in detailed[k]}) if k in detailed else v for k, v in free.items()
-                            if k in detailed or data.get('catalogSource') != 'radar-overlay'}
+                            if k in detailed}
             except HTTPException:
                 warnings.append('Free tier summary unavailable')
     elif filters.free_only:
         raise HTTPException(status_code=409, detail='Free discovery requires HTTPS')
     if filters.free_only:
+        if summary is None:
+            warnings.append('Free-tier summary could not be verified; results reflect the baseline catalog only.')
         warnings.append('Cataloged free offers only; account eligibility and zero cost are not guaranteed. Unverified combos excluded.')
     models = _filtered_rows(rows, filters, free, rankings)
     stats['delivered'] = len(models)

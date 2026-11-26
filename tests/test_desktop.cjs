@@ -212,3 +212,26 @@ test('discovery multi-select sends explicit filters and does not activate chat',
   assert.equal(c.calls.some(x=>x.endpoint==='/activate-chat'),false);
   assert.ok(JSON.stringify(c.render()).includes('p/llm'));
 });
+
+test('Dashboard multi-select uses authenticated plugin REST and preserves routing IDs', async () => {
+  const dashboard = fs.readFileSync(path.resolve(__dirname, '../backend/dashboard/dist/index.js'), 'utf8');
+  const state = []; let next = 0, effects = [], panel;
+  const calls = [];
+  const h = (type, props, ...children) => ({type, props:{...(props||{}), children}});
+  const components = Object.fromEntries(['Card','CardHeader','CardTitle','CardContent','Input','Button'].map(x=>[x,x]));
+  const SDK = {React:{createElement:h,useState(initial){const i=next++;if(!(i in state))state[i]=initial;return [state[i],v=>{state[i]=typeof v==='function'?v(state[i]):v;}];},useEffect(fn){effects.push(fn);}},components,
+    fetchJSON(url,options){calls.push({url,options});return Promise.resolve(url.endsWith('/status')?status:{models:[{id:'provider/org/model',route_label:'provider/org/model',label:'Example',kind:'chat'}],warnings:[]});}};
+  vm.runInNewContext(dashboard,{window:{__HERMES_PLUGIN_SDK__:SDK,__HERMES_PLUGINS__:{register(id,fn){assert.equal(id,'omniroute-media');panel=fn;}}}}, {timeout:2500});
+  function render(){next=0;effects=[];return panel();}
+  function flatten(n,out=[]){if(!n||typeof n!=='object')return out;if(Array.isArray(n)){n.forEach(x=>flatten(x,out));return out;}out.push(n);flatten(n.props?.children,out);return out;}
+  render(); effects[0](); await tick();
+  function toggle(label, checked){const n=flatten(render()).find(n=>n.type==='label'&&n.props.children.includes(label));assert.ok(n,label);n.props.children.find(x=>x?.type==='input').props.onChange({target:{checked}});}
+  toggle('Todos os tipos',false);
+  toggle('LLM / Chat',true);toggle('Imagem',true);toggle('Tool calling',true);
+  const query=flatten(render()).find(n=>n.type==='Button'&&n.props.children.includes('Consultar catálogo'));
+  query.props.onClick();await tick();
+  const call=calls.at(-1);assert.ok(call.url.endsWith('/discover-models'));assert.equal(call.options.method,'POST');
+  const body=JSON.parse(call.options.body);assert.deepEqual(body.kinds,['chat','image']);assert.deepEqual(body.capabilities,['tool_calling']);
+  assert.ok(JSON.stringify(render()).includes('provider/org/model'));
+  assert.equal(calls.some(x=>x.url.endsWith('/activate-chat')),false);
+});

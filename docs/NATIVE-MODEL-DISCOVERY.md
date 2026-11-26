@@ -21,7 +21,8 @@ No MCP is used.
   It is never returned or sent over HTTP. Changing the endpoint with a stored read token requires explicit replacement or removal. A preexisting inference key with
   management access can also support free-only discovery. The separate read
   token enables provider health and global summary enrichment when supported.
-  Global totals are not account-specific quotas. A current Radar overlay can retire a baseline offer; these rows are not revived. Rankings are not model prices.
+  An existing inference key is used for management only on explicit free-only discovery if no separate token exists.
+  Global totals are not account-specific quotas. The effective summary can retire a baseline offer; these rows are not revived. If the summary cannot be read, the UI warns that only baseline offers are represented. Rankings are not model prices.
 - Inference continues to use the existing API key. TLS verification and
   no-redirect behavior are preserved. The existing model-provider and
   per-category pickers remain intact, and only compatible chat/image/video

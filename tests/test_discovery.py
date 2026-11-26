@@ -132,3 +132,40 @@ class Discovery(unittest.TestCase):
             with self.assertRaises(HTTPException):
                 api.save_connection(api.Connection(base_url='https://other.example/v1'))
             save.assert_not_called()
+
+    def test_summary_enrichment_and_management_key_fallback(self):
+        budget={'provider':'p','modelId':'org/a','freeType':'recurring-daily','monthlyTokens':100}
+        calls=[]
+        def get(url,key):
+            calls.append((url,key))
+            if url.endswith('/free-models'): return {'models':[budget]}
+            if '/free-provider-rankings?' in url: return {'rankings':[{'id':'p','topModel':{'modelId':'org/b'},'reliability':{'state':'healthy','usage':{'requests':12,'successes':11,'avgLatencyMs':234,'windowHours':24}}}]}
+            return {'catalogSource':'baseline','modelCount':1,'perModel':[dict(budget,hardStopGuaranteed=False,trainsOnPrompts=True)]}
+        with patch.object(api,'_value',return_value='https://router.example/api/v1'), patch.object(api,'_secret',side_effect=lambda n:'key-with-manage' if n=='OMNIROUTE_API_KEY' else ''), patch.object(api,'_fetch_catalog',return_value=rows), patch.object(api,'_discovery_get',side_effect=get):
+            result=api.discover_models(api.DiscoveryFilters(free_only=True))
+        self.assertEqual([r['id'] for r in result['models']],['p/org/a'])
+        self.assertEqual(result['models'][0]['provider_usage']['requests'],12)
+        self.assertFalse(result['models'][0]['free_metadata']['hardStopGuaranteed'])
+        self.assertTrue(result['models'][0]['free_metadata']['trainsOnPrompts'])
+        self.assertEqual(len(calls),3)
+        self.assertTrue(all(key=='key-with-manage' and url.startswith('https://router.example/api/') for url,key in calls))
+    def test_no_management_request_by_default_without_read_token(self):
+        with patch.object(api,'_value',return_value='https://router.example/v1'), patch.object(api,'_secret',side_effect=lambda n:'inference-key' if n=='OMNIROUTE_API_KEY' else ''), patch.object(api,'_fetch_catalog',return_value=rows), patch.object(api,'_discovery_get') as get:
+            result=api.discover_models(api.DiscoveryFilters())
+        get.assert_not_called()
+        self.assertEqual(result['count'],5)
+    def test_management_token_never_sent_over_http(self):
+        with patch.object(api,'_value',return_value='http://127.0.0.1/v1'), patch.object(api,'_secret',return_value='synthetic'), patch.object(api,'_fetch_catalog',return_value=rows), patch.object(api,'_discovery_get') as get:
+            with self.assertRaises(HTTPException):
+                api.discover_models(api.DiscoveryFilters(free_only=True))
+            get.assert_not_called()
+    def test_audio_is_not_chat_and_unknown_owner_is_preserved(self):
+        source=[{'id':'tts','type':'chat','subtype':'speech','owned_by':'p'},
+                {'id':'legacy'}, {'id':'combo-a','type':'combo'}]
+        self.assertEqual([r['id'] for r in api._filtered_rows(source,api.DiscoveryFilters(kinds=['chat']),{}, {})],['legacy','combo-a'])
+        self.assertEqual([r['id'] for r in api._filtered_rows(source,api.DiscoveryFilters(kinds=['audio']),{}, {})],['tts'])
+    def test_clear_token_is_explicit_and_returns_only_boolean(self):
+        with patch.object(api,'_value',return_value='https://router.example/v1'), patch.object(api,'_secret',return_value='synthetic-secret'), patch.object(api,'save_env_value_secure') as save, patch.object(api,'status',return_value={'read_token_configured':True}):
+            result=api.save_connection(api.Connection(clear_read_token=True))
+            save.assert_called_once_with('OMNIROUTE_READ_TOKEN','')
+            self.assertEqual(result,{'read_token_configured':False})
