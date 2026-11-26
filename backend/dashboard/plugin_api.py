@@ -266,7 +266,7 @@ DISCOVERY_CAPS = ('tool_calling', 'reasoning', 'thinking', 'vision',
 class DiscoveryFilters(BaseModel):
     kinds: list[str] = Field(default_factory=lambda: list(DISCOVERY_KINDS), max_length=8)
     capabilities: list[str] = Field(default_factory=list, max_length=11)
-    sources: list[str] = Field(default_factory=list, max_length=4)
+    sources: list[str] = Field(default_factory=list, max_length=len(_enrich.SOURCES))
     providers: list[str] = Field(default_factory=list, max_length=64)
     access: list[str] = Field(default_factory=list, max_length=9)
     input_modalities: list[str] = Field(default_factory=list, max_length=7)
@@ -407,7 +407,12 @@ def _filtered_rows(rows: list, filters: DiscoveryFilters, free: dict, rankings: 
         root = row.get('root')
         # An external offer belongs to the exact canonical route only.
         identity = (owner, root) if isinstance(root, str) and identifier == owner + '/' + root and not is_combo else None
-        metadata = external.get(identity, {}) if identity else {}
+        # Only a typed media row with exact canonical owner prefix can omit root.
+        if (identity is None and root is None and not is_combo and owner and
+                row.get('type') in set(DISCOVERY_KINDS) - {'chat'} and identifier.startswith(owner+'/')):
+            exact = identifier[len(owner)+1:]
+            if _enrich.safe_id(exact): identity = (owner,exact)
+        metadata = _enrich.route_metadata(external,identity)
         if filters.providers and owner not in filters.providers:
             continue
         raw_kind = row.get('type')
@@ -499,6 +504,7 @@ def _filtered_rows(rows: list, filters: DiscoveryFilters, free: dict, rankings: 
                               'kind': kind, 'provider': owner, 'context_length': context,
                               'capabilities': [cap for cap in DISCOVERY_CAPS if cap in effective_caps],
                               'access': access, 'input': inputs, 'output': outputs,
+                              'access_condition': metadata.get('access_condition'), 'advertised_limits': metadata.get('advertised_limits'),
                               'lifecycle': metadata.get('lifecycle'), 'privacy': privacy,
                               'parameter_count': metadata.get('parameter_count'), 'pricing': metadata.get('pricing'),
                               'quota_status': quota, 'health_status': state, 'sources': sources, 'provenance': provenance,
@@ -590,6 +596,7 @@ def discover_models(filters: DiscoveryFilters):
             except HTTPException:
                 summary = None
                 warnings.append('Free tier summary unavailable')
+                if filters.free_only or set(filters.access).intersection(_enrich.FREE): incomplete = True
     elif filters.free_only:
         raise HTTPException(status_code=409, detail='Free discovery requires HTTPS')
     if filters.free_only:
@@ -616,7 +623,7 @@ def discover_models(filters: DiscoveryFilters):
             accounts = data['accountQuotas']
         except HTTPException:
             warnings.append('Account quota status unavailable; unknown is not exhausted.')
-            if filters.quota_mode == 'confirmed': incomplete = True
+            incomplete = True
     if filters.exclude_cooling:
         try:
             data = _discovery_get(base+'/models/health',key)

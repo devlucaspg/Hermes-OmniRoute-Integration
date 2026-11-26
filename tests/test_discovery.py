@@ -269,3 +269,39 @@ class EnrichedDiscovery(unittest.TestCase):
         row={'id':'nvidia/org/m','owned_by':'nvidia','root':'org/m','capabilities':{'vision':False}}
         external={('nvidia','org/m'):{'source':'fixture','input':['text','image'],'capabilities':['vision']}}
         self.assertEqual(api._filtered_rows([row],api.DiscoveryFilters(input_modalities=['image']),{}, {},external),[])
+
+    def test_gemini_exact_standard_pricing(self):
+        def section(name,a,b):
+            return '## '+name+'\n{% left-column %}\n[\x60'+name+'\x60](/docs/models/'+name+')\n{% /left-column %}\n{% tab title="Standard" %}\n{% table %}\n* Feature\n* Free Tier\n* Paid Tier\n---\n* Input price\n* '+a+'\n* $1\n---\n* Output price\n* '+b+'\n* $2\n{% /table %}\n{% /tab %}\n'
+        data='# Gemini Developer API pricing\n'+section('gemini-example','Free of charge','Free of charge')+section('gemini-paid','Not available','Not available')+section('gemini-mixed','Free of charge','Not available')
+        self.assertEqual({e['model_id']:e['access'] for e in api._enrich.parse_gemini(data)},{'gemini-example':['free_quota'],'gemini-paid':['paid'],'gemini-mixed':['unknown_pricing']})
+    def test_groq_active_free_table_required(self):
+        header='<table><tr><th><button class="bg-black dark:bg-white">Free Plan Limits</button><button class="other">Developer Plan Limits</button></th></tr><tr>'+''.join('<th>'+v+'</th>' for v in ('MODEL ID','RPM','RPD','TPM','TPD','ASH','ASD'))+'</tr></table>'
+        rows='<table><tr>'+''.join('<td>'+v+'</td>' for v in ('org/example','30','1K','8K','200K','-','-'))+'</tr></table>'
+        self.assertEqual(api._enrich.parse_groq(header+rows)[0]['access'],['free_quota'])
+        with self.assertRaises(ValueError): api._enrich.parse_groq((header+rows).replace('bg-black dark:bg-white','other'))
+    def test_cloudflare_explicit_paid_exceptions(self):
+        data='# Pricing\n10,000 Neurons per day at no charge. Workers Paid.\nSome models require a paid billing method. This applies to \x60@cf/org/paid\x60. You can access these models.\n## LLM model pricing\n'+''.join('| @cf/org/'+v+' | $1 | 1000 neurons per M tokens |\n' for v in ('free','paid','a','b','c'))
+        result={e['model_id']:e for e in api._enrich.parse_cloudflare(data)}
+        self.assertEqual(result['@cf/org/free']['access'],['free_quota'])
+        self.assertEqual(result['@cf/org/paid']['access'],['paid'])
+        with self.assertRaises(ValueError): api._enrich.parse_cloudflare(data.replace('Some models require a paid billing method.','Changed.'))
+    def test_mistral_policy_only_labs(self):
+        index={('mistral',api._enrich.POLICY_ID):{'source':'fixture','policy':'mistral_labs','fetched_at':1}}
+        self.assertEqual(api._enrich.route_metadata(index,('mistral','labs-example'))['access'],['free_preview'])
+        self.assertEqual(api._enrich.route_metadata(index,('mistral','mistral-medium')), {})
+    def test_sambanova_metered_prices_not_free(self):
+        with patch.object(api._enrich,'public_json',return_value={'data':[{'id':'model','pricing':{'prompt':'0.01','completion':'0.02'}}]}):
+            rows,_,_=api._enrich.sambanova()
+        self.assertEqual(rows[0]['access'],['paid'])
+    def test_exact_rootless_media(self):
+        source=[{'id':'gemini/audio-example','owned_by':'gemini','root':None,'type':'audio'},
+                {'id':'gemini/audio-example-alias','owned_by':'gemini','root':None,'type':'audio'}]
+        meta={('gemini','audio-example'):{'source':'fixture','access':['free_quota']}}
+        result=api._filtered_rows(source,api.DiscoveryFilters(kinds=['audio'],free_only=True),{}, {},meta)
+        self.assertEqual([r['id'] for r in result],['gemini/audio-example'])
+    def test_expired_reset_unknown(self):
+        from datetime import datetime, timezone, timedelta
+        now=datetime.now(timezone.utc)
+        account={'provider':'xkiro','fetchedAt':now.isoformat(),'quotas':{'free_daily':{'remainingPercentage':0,'resetAt':(now-timedelta(seconds=1)).isoformat()}}}
+        self.assertEqual(api._enrich.quota_status('xkiro',['free_quota'],[account]),'unknown')
