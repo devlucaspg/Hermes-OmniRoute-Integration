@@ -177,7 +177,8 @@ test('settings show routing labels but keep the exact model id on selection', as
   assert.ok(opts.some(n => n.props.value === 'Combo-1' && n.props.children === 'combo/Combo-1'));
   assert.ok(opts.some(n => n.props.value === 'openrouter/nvidia/nemotron' && n.props.children === 'openrouter/nvidia/nemotron'));
   assert.ok(opts.some(n => n.props.value === 'groq/legacy' && n.props.children === 'groq/legacy'));
-  const select = nodes.find(n => n.type === 'select');
+  const select = nodes.find(n => n.type === 'select' && n.props['aria-label'] === 'Modelos disponíveis: LLM / Chat');
+  assert.ok(select, 'chat model selector');
   select.props.onChange({target:{value:'Combo-1'}});
   const save = c.flatten(c.render()).find(n => n.type === 'button' && n.props?.children === 'Salvar');
   save.props.onClick(); await tick();

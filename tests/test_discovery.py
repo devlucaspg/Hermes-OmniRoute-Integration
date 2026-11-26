@@ -160,7 +160,8 @@ class Discovery(unittest.TestCase):
                 api.discover_models(api.DiscoveryFilters(free_only=True))
             get.assert_not_called()
     def test_audio_is_not_chat_and_unknown_owner_is_preserved(self):
-        source=[{'id':'tts','type':'chat','subtype':'speech','owned_by':'p'},
+        source=[{'id':'malformed','type':'chat','subtype':'speech','owned_by':'p'},
+                {'id':'tts','type':'audio','subtype':'speech','owned_by':'p'},
                 {'id':'legacy'}, {'id':'combo-a','type':'combo'}]
         self.assertEqual([r['id'] for r in api._filtered_rows(source,api.DiscoveryFilters(kinds=['chat']),{}, {})],['legacy','combo-a'])
         self.assertEqual([r['id'] for r in api._filtered_rows(source,api.DiscoveryFilters(kinds=['audio']),{}, {})],['tts'])
