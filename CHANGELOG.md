@@ -1,3 +1,8 @@
+## 0.4.0-beta.5 — Readable dropdowns and rounded context labels
+
+- Use explicit theme foreground and background for native selects and options on Desktop and Dashboard, including model selectors.
+- Round context labels to the nearest thousand for readability without changing the exact numeric request values.
+
 ## 0.4.0-beta.4 — Applied conversation catalog
 
 - A successful UI query atomically saves the filtered chat catalog and filters in the active Hermes profile; both native provider and configured relay discovery read that selection.

@@ -2,7 +2,10 @@
   "use strict";
   var SDK = window.__HERMES_PLUGIN_SDK__;
   if (!SDK || !window.__HERMES_PLUGINS__) return;
-  var UI_VERSION = '0.4.0-beta.4';
+  var UI_VERSION = '0.4.0-beta.5';
+  // Dashboard's --foreground can be transparent; use the opaque base tokens.
+  var SELECT_COLORS = {backgroundColor:'var(--background-base, Canvas)',color:'var(--midground-base, CanvasText)',colorScheme:'light dark'};
+  var contextLabel = n => n ? Math.round(n / 1000).toLocaleString('pt-BR') + ' mil tokens' : 'Sem restrição';
   var React = SDK.React;
   var h = React.createElement;
   var C = SDK.components;
@@ -96,8 +99,8 @@ const initialDiscovery = () => ({kinds: DISCOVERY_TYPES.map(x=>x[0]), capabiliti
           check('Qualquer capacidade (sem restrição)',filters.capabilities.length===0,v=>updateFilter('capabilities',v?[]:['tool_calling'])),
           check('Selecionar todas as capacidades',filters.capabilities.length===DISCOVERY_CAPABILITIES.length,v=>updateFilter('capabilities',v?DISCOVERY_CAPABILITIES.map(x=>x[0]):[])),
           h('div',{className:'grid grid-cols-2 gap-1'},DISCOVERY_CAPABILITIES.map(([k,l])=>check(l,filters.capabilities.includes(k),v=>toggleFilter('capabilities',k,v)))),
-          Field('Correspondência',h('select',{value:filters.match,disabled:loading,onChange:e=>updateFilter('match',e.target.value)},h('option',{value:'and'},'Todas (AND)'),h('option',{value:'or'},'Pelo menos uma (OR)'))),
-          Field('Contexto mínimo',h('select',{value:filters.min_context,disabled:loading,onChange:e=>updateFilter('min_context',Number(e.target.value))},[0,32768,65536,131072,262144,524288,1048576].map(n=>h('option',{key:n,value:n},n?n+' tokens':'Sem restrição')))),
+          Field('Correspondência',h('select',{style:SELECT_COLORS,className:'w-full p-2 rounded border',value:filters.match,disabled:loading,onChange:e=>updateFilter('match',e.target.value)},h('option',{style:SELECT_COLORS,value:'and'},'Todas (AND)'),h('option',{style:SELECT_COLORS,value:'or'},'Pelo menos uma (OR)'))),
+          Field('Contexto mínimo',h('select',{style:SELECT_COLORS,className:'w-full p-2 rounded border',value:filters.min_context,disabled:loading,onChange:e=>updateFilter('min_context',Number(e.target.value))},[0,32768,65536,131072,262144,524288,1048576].map(n=>h('option',{style:SELECT_COLORS,key:n,value:n},contextLabel(n))))),
           h(C.Button,{disabled:loading||!filters.kinds.length,onClick:discoverAll},'Consultar catálogo'),
           h('p',{className:'text-xs'},'A consulta bem-sucedida aplica os modelos de chat ao seletor da conversa. Use Atualizar modelos no seletor.'),
           Number.isInteger(state?.picker_count)&&h('p',{className:'text-xs'},'Catálogo aplicado: '+state.picker_count+' modelo(s) de chat.'),
@@ -120,9 +123,9 @@ const initialDiscovery = () => ({kinds: DISCOVERY_TYPES.map(x=>x[0]), capabiliti
             h(C.Button, {disabled:loading || !selections[kind], onClick:function(){send('/model',{kind:kind,model:selections[kind]},'Model saved');}}, 'Save'),
             h(C.Button, {disabled:loading, onClick:function(){showModels(kind)}}, 'Discover')
           ),
-          catalogs[kind] && h('select',{className:'w-full p-2 rounded border',value:'',onChange:function(e){var v=e.target.value;setSelections(function(s){return Object.assign({},s,{[kind]:v});});}},
-            h('option', {value:''}, 'Select a discovered model (' + catalogs[kind].length + ')'),
-            catalogs[kind].map(function(m){return h('option', {value:m.id,key:m.id}, m.route_label || m.id);})
+          catalogs[kind] && h('select',{style:SELECT_COLORS,className:'w-full p-2 rounded border',value:'',onChange:function(e){var v=e.target.value;setSelections(function(s){return Object.assign({},s,{[kind]:v});});}},
+            h('option', {style:SELECT_COLORS,value:''}, 'Select a discovered model (' + catalogs[kind].length + ')'),
+            catalogs[kind].map(function(m){return h('option', {style:SELECT_COLORS,value:m.id,key:m.id}, m.route_label || m.id);})
           )
         );}) )
       ),

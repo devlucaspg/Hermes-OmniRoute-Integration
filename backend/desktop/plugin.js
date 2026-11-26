@@ -10,7 +10,18 @@ import { useEffect, useState } from 'react'
 import { jsx, jsxs } from 'react/jsx-runtime'
 import * as sdk from '@hermes/plugin-sdk'
 
-const UI_VERSION = '0.4.0-beta.4'
+const UI_VERSION = '0.4.0-beta.5'
+
+// The host declares color-scheme: light even for custom dark palettes.
+// Explicit opaque foreground AND background prevent pale text on the
+// native Windows/Electron option popup. Use the same pair for every option.
+const SELECT_COLORS = {
+  backgroundColor: 'var(--ui-bg-elevated, Canvas)',
+  color: 'var(--ui-base, CanvasText)',
+  colorScheme: 'light dark',
+}
+const SELECT_STYLE = { ...SELECT_COLORS, borderColor: 'var(--ui-stroke-secondary)' }
+const contextLabel = n => n ? Math.round(n / 1000).toLocaleString('pt-BR') + ' mil tokens' : 'Sem restrição'
 
 const CATEGORIES = Object.freeze([
   ['chat', 'LLM / Chat'],
@@ -301,10 +312,10 @@ function OmniRouteSettings({ rest }) {
           checkbox('Qualquer capacidade (sem restrição)',filters.capabilities.length===0,v=>updateFilter('capabilities',v?[]:['tool_calling'])),
           checkbox('Selecionar todas as capacidades',filters.capabilities.length===DISCOVERY_CAPABILITIES.length,v=>updateFilter('capabilities',v?DISCOVERY_CAPABILITIES.map(x=>x[0]):[])),
           jsx('div',{className:'grid grid-cols-2 gap-1',children:DISCOVERY_CAPABILITIES.map(([k,l])=>checkbox(l,filters.capabilities.includes(k),v=>toggleFilter('capabilities',k,v)))}),
-          jsx(Field,{label:'Correspondência',children:jsxs('select',{value:filters.match,disabled:busy,onChange:e=>updateFilter('match',e.target.value),children:[
-            jsx('option',{value:'and',children:'Todas as selecionadas (AND)'}),jsx('option',{value:'or',children:'Pelo menos uma (OR)'})
+          jsx(Field,{label:'Correspondência',children:jsxs('select',{style:SELECT_STYLE,className:'w-full rounded border px-2 py-1.5',value:filters.match,disabled:busy,onChange:e=>updateFilter('match',e.target.value),children:[
+            jsx('option',{style:SELECT_COLORS,value:'and',children:'Todas as selecionadas (AND)'}),jsx('option',{style:SELECT_COLORS,value:'or',children:'Pelo menos uma (OR)'})
           ]})}),
-          jsx(Field,{label:'Contexto mínimo',children:jsx('select',{value:filters.min_context,disabled:busy,onChange:e=>updateFilter('min_context',Number(e.target.value)),children:[0,32768,65536,131072,262144,524288,1048576].map(n=>jsx('option',{value:n,children:n?String(n)+' tokens':'Sem restrição'},n))})}),
+          jsx(Field,{label:'Contexto mínimo',children:jsx('select',{style:SELECT_STYLE,className:'w-full rounded border px-2 py-1.5',value:filters.min_context,disabled:busy,onChange:e=>updateFilter('min_context',Number(e.target.value)),children:[0,32768,65536,131072,262144,524288,1048576].map(n=>jsx('option',{style:SELECT_COLORS,value:n,children:contextLabel(n)},n))})}),
           jsx(Action,{disabled:busy||!filters.kinds.length,onClick:discoverAll,children:'Consultar catálogo'}),
           jsx('p',{className:'text-xs',children:'A consulta bem-sucedida aplica automaticamente os modelos de chat ao seletor da conversa. Use Atualizar modelos no seletor para recarregar a lista.'}),
           Number.isInteger(state?.picker_count)&&jsx('p',{className:'text-xs',children:'Catálogo aplicado: '+state.picker_count+' modelo(s) de chat.'}),
@@ -354,13 +365,13 @@ function OmniRouteSettings({ rest }) {
             }),
             catalogs[kind] && jsx('select', {
               className: 'w-full rounded border px-2 py-1.5',
-              style: { borderColor: 'var(--ui-stroke-secondary)' },
+              style: SELECT_STYLE,
               defaultValue: '',
               'aria-label': 'Modelos disponíveis: ' + label,
               onChange: e => { if (e.target.value) setModels(old => ({ ...old, [kind]: e.target.value })) },
               children: [
-                jsx('option', { value: '', children: 'Escolha um modelo (' + catalogs[kind].length + ')' }),
-                ...catalogs[kind].map(item => jsx('option', { value: item.id, children: item.label }, item.id)),
+                jsx('option', { style: SELECT_COLORS, value: '', children: 'Escolha um modelo (' + catalogs[kind].length + ')' }),
+                ...catalogs[kind].map(item => jsx('option', { style: SELECT_COLORS, value: item.id, children: item.label }, item.id)),
               ],
             }),
           ] }),

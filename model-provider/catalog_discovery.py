@@ -64,7 +64,7 @@ def _fetch_pages(root, key, opener, timeout, path, stats, query_params=None):
             try:
                 req = request.Request(url, headers={
                     'Authorization': 'Bearer ' + key, 'Accept': 'application/json',
-                    'User-Agent': 'hermes-omniroute-community/0.4.0-beta.4',
+                    'User-Agent': 'hermes-omniroute-community/0.4.0-beta.5',
                 })
                 with opener.open(req, timeout=min(timeout, remaining)) as response:
                     raw = response.read(max_bytes + 1)

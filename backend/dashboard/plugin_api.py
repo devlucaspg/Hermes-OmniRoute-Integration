@@ -20,7 +20,7 @@ import ipaddress
 
 router = APIRouter()
 
-PLUGIN_VERSION = '0.4.0-beta.4'
+PLUGIN_VERSION = '0.4.0-beta.5'
 
 KINDS = {
     'chat': 'OMNIROUTE_CHAT_MODEL',

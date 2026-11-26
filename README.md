@@ -2,7 +2,7 @@
 
 [Leia em Português (Brasil)](README.pt-BR.md)
 
-**Release candidate:** `0.4.0-beta.4` (not yet submitted or accepted by the official Hermes Marketplace).
+**Release candidate:** `0.4.0-beta.5` (not yet submitted or accepted by the official Hermes Marketplace).
 
 An original, self-hosted integration connecting the [Hermes Agent](https://github.com/NousResearch/hermes-agent) to any configured [OmniRoute](https://github.com/cheaper-inference/OmniRoute) OpenAI-compatible routing instance.
 
@@ -59,7 +59,7 @@ These are **two separate installs**, not a single combined Marketplace entry. Th
 
 ### Install with the developer script (alternative)
 
-Clone the intended development branch (v0.4.0-beta.4) on the Hermes machine and invoke the installer:
+Clone the intended development branch (v0.4.0-beta.5) on the Hermes machine and invoke the installer:
 
 ```bash
 git clone https://github.com/devlucaspg/Hermes-OmniRoute-Integration.git
@@ -113,7 +113,7 @@ Full directions, safety boundaries, prerequisites, diagnostics and rollback: [do
 
 ## Compatibility with OmniRoute 3.8.53
 
-The v0.4.0-beta.4 adapter is aligned against **OmniRoute tag v3.8.53**. In particular:
+The v0.4.0-beta.5 adapter is aligned against **OmniRoute tag v3.8.53**. In particular:
 
 - Chat models are discovered from the complete API-key-authorized unified catalog using `GET /v1/models?prefix=alias&limit=200` and subsequent `after` cursors. Local classification preserves valid chat subtypes and combos and excludes specialized models. The dashboard no longer truncates at 1,000 entries. The client reduces the page size on oversized responses and fails explicitly on incomplete pagination; per-page and aggregate safety budgets remain. The native provider registers Hermes's `picker_catalog` hook and its base URL environment variable without storing profile credentials globally.
 - Hermes Desktop initially displays 50 model families per provider; search and model visibility settings are Hermes-owned and are not changed by this plugin. Use the Hermes **Refresh models** action after a catalog change. The plugin's media catalog cache uses a 60-second successful-result TTL, isolated by endpoint and key fingerprint; failed results are not cached.

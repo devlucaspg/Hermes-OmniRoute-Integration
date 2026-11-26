@@ -245,7 +245,7 @@ test('Desktop footer identifies its own version independently of remote backend'
   const footer=c.flatten(c.render()).find(n=>n.type==='footer');
   assert.ok(footer);
   const content=JSON.stringify(footer);
-  assert.ok(content.includes('Interface Desktop v0.4.0-beta.4'));
+  assert.ok(content.includes('Interface Desktop v0.4.0-beta.5'));
   assert.ok(content.includes('Backend conectado: v0.4.0-beta.2'));
   assert.ok(content.includes('Versões diferentes'));
 });
@@ -261,4 +261,34 @@ test('Dashboard and Desktop version markers match the package manifest', () => {
   assert.ok(source.includes("UI_VERSION = '"+version+"'"));
   assert.ok(dashboard.includes("UI_VERSION = '"+version+"'"));
   assert.ok(api.includes("PLUGIN_VERSION = '"+version+"'"));
+});
+
+
+test('all Desktop native dropdown options use explicit theme colors; context labels are rounded but values remain exact', async () => {
+  const c=build({backend:{'/status':status,'/models?kind=chat':{models:[{id:'p/example'}]}}});
+  c.render(); c.effects()[0](); await tick();
+  let nodes=c.flatten(c.render());
+  const search=nodes.find(n=>n.type==='button'&&n.props.children==='Buscar modelos');
+  search.props.onClick(); await tick();
+  nodes=c.flatten(c.render());
+  const selects=nodes.filter(n=>n.type==='select');
+  assert.equal(selects.length,3);
+  for(const select of selects) {
+    assert.ok(select.props.style.backgroundColor);
+    assert.ok(select.props.style.color);
+    for(const option of c.flatten(select).filter(n=>n.type==='option')) {
+      assert.equal(option.props.style.backgroundColor,select.props.style.backgroundColor);
+      assert.equal(option.props.style.color,select.props.style.color);
+    }
+  }
+  const options=nodes.filter(n=>n.type==='option');
+  for(const [value,label] of [[32768,'33 mil tokens'],[65536,'66 mil tokens'],[1048576,'1.049 mil tokens']]) {
+    const option=options.find(n=>n.props.value===value);
+    assert.equal(option.props.children,label);
+  }
+  const ctx=selects.find(n=>n.props.value===0);
+  ctx.props.onChange({target:{value:'65536'}});
+  const button=c.flatten(c.render()).find(n=>n.type==='button'&&n.props.children==='Consultar catálogo');
+  button.props.onClick(); await tick();
+  assert.equal(c.calls.at(-1).options.body.min_context,65536);
 });
