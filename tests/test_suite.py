@@ -532,6 +532,31 @@ class OmniRoute353RegressionTests(unittest.TestCase):
             self.assertIsNone(module.omniroute.fetch_models(base_url='https://other.example/v1'))
             transport.assert_not_called()
 
+    def test_native_provider_and_relay_use_applied_chat_catalog(self):
+        import tempfile
+        pro = types.ModuleType('providers')
+        base = types.ModuleType('providers.base')
+        constants = types.ModuleType('hermes_constants')
+        class Profile:
+            def __init__(self, **kwargs): self.__dict__.update(kwargs)
+        pro.register_provider = lambda p: None
+        base.ProviderProfile = Profile
+        with tempfile.TemporaryDirectory() as home:
+            constants.get_hermes_home = lambda: Path(home)
+            with patch.dict(sys.modules, {'providers':pro,'providers.base':base,'hermes_constants':constants}):
+                spec=importlib.util.spec_from_file_location('omni_picker_provider',ROOT/'model-provider/__init__.py')
+                module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+                endpoint='https://router.example/v1'
+                with patch.object(module,'_env',side_effect=lambda n:endpoint if n.endswith('BASE_URL') else 'synthetic'), patch.object(module.request,'build_opener') as transport:
+                    module._catalog_module.write_picker_selection(home,endpoint,{'kinds':['chat']},['p/alpha','combo-1'])
+                    self.assertEqual(module.omniroute.picker_catalog(True),['p/alpha','combo-1'])
+                    self.assertEqual(module.omniroute.fetch_models(api_key='synthetic',base_url=endpoint),['p/alpha','combo-1'])
+                    module._catalog_module.write_picker_selection(home,endpoint,{'kinds':['image']},[])
+                    self.assertEqual(module.omniroute.picker_catalog(True),[])
+                    self.assertEqual(module.omniroute.fetch_models(api_key='synthetic',base_url=endpoint),[])
+                    self.assertIsNone(module.omniroute.fetch_models(api_key='',base_url=endpoint))
+                    transport.assert_not_called()
+
     def test_image_without_advertised_size_does_not_set_size(self):
         from omniroute_test_backend.providers import image as im
         for model in ('zm/inclusionai/ming-image-0.1-design', 'custom/unknown'):

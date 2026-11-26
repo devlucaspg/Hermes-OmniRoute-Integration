@@ -34,7 +34,7 @@ try {
     Copy-Item -LiteralPath $Source -Destination $TargetFile -Force -ErrorAction Stop
     $Hash = (Get-FileHash -LiteralPath $TargetFile -Algorithm SHA256).Hash
     @(
-        "Instalacao OmniRoute Desktop UI v0.4.0-beta.3: $Stamp",
+        "Instalacao OmniRoute Desktop UI v0.4.0-beta.4: $Stamp",
         "Origem: $Source",
         "Destino: $TargetFile",
         "SHA256 do plugin.js: $Hash",

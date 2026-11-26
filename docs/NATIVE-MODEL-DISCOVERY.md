@@ -30,3 +30,8 @@ No MCP is used.
 - A catalog may include keyless providers and aliases even with configuredOnly.
   Listing a model does not confirm live inference success.
 - Tests use synthetic contract data; private instance JSON is not published.
+
+
+## Applied conversation catalog
+
+A successful query from either plugin UI publishes only the matching chat IDs to the current Hermes profile, preserving exact routing IDs. The native provider and configured relay catalog paths read the same snapshot. The native conversation menu's Refresh Models button reloads the applied selection; run Consultar catálogo again for fresh upstream data or to change filters. Non-chat results remain in the general catalog; the selected model and other providers are unchanged. An empty successful chat result is intentional; a failed query leaves the previous selection in place. No credentials are stored in the snapshot. Replacing the endpoint or inference key clears the applied selection. This is a picker preference, not an inference access-control policy.

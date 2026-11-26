@@ -1,3 +1,9 @@
+## 0.4.0-beta.4 — Applied conversation catalog
+
+- A successful UI query atomically saves the filtered chat catalog and filters in the active Hermes profile; both native provider and configured relay discovery read that selection.
+- Invalidate the Hermes provider disk cache after applying; the native Refresh Models button reloads the applied catalog.
+- Restore the last applied filters and show the count of applied chat models. Preserve the currently selected model and other providers.
+
 ## 0.4.0-beta.3 — Native discovery and installed-version diagnostics
 
 - General model discovery with multi-select types and capabilities, AND/OR matching, native filters, complete pagination, free-catalog enrichment and provider reliability.
