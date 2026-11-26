@@ -9,12 +9,21 @@
     ['chat','LLM / Chat'], ['image','Images'], ['video','Video'],
     ['tts','Text-to-speech'], ['stt','Speech-to-text']
   ];
+
+const DISCOVERY_TYPES = [['chat','LLM / Chat'],['embedding','Embeddings'],['image','Imagem'],['audio','Áudio'],['video','Vídeo'],['rerank','Reranking'],['moderation','Moderação'],['music','Música']]
+const DISCOVERY_CAPABILITIES = [['tool_calling','Tool calling'],['reasoning','Raciocínio'],['thinking','Thinking'],['vision','Visão'],['structured_output','Saída estruturada'],['attachment','Anexos'],['temperature','Temperatura']]
+const initialDiscovery = () => ({kinds: DISCOVERY_TYPES.map(x=>x[0]), capabilities: [], match:'and', configured_only:true, free_only:false, include_combos:true, min_context:0, q:''})
+
   var base = '/api/plugins/omniroute-media';
   function Field(label, input) {
     return h('label', {key:label, className:'block mb-3'},
       h('span', {className:'block text-sm mb-1'}, label), input);
   }
   function Panel() {
+    var [filters,setFilters]=React.useState(initialDiscovery());
+    var [discovery,setDiscovery]=React.useState(null);
+    var [page,setPage]=React.useState(0);
+    var [readToken,setReadToken]=React.useState('');
     var status = React.useState(null), state = status[0], setState = status[1];
     var url = React.useState(''), currentUrl = url[0], setUrl = url[1];
     var secret = React.useState(''), key = secret[0], setKey = secret[1];
@@ -32,7 +41,7 @@
     function send(path, data, ok) {
       setLoading(true); setFeedback('');
       SDK.fetchJSON(base + path, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)})
-        .then(function(s){setState(s); setKey(''); setFeedback(ok + ' (a Hermes reload may be needed).');})
+        .then(function(s){setState(s); setKey(''); setReadToken(''); setFeedback(ok + ' (a Hermes reload may be needed).');})
         .catch(function(e){setFeedback(String(e.message || e));})
         .finally(function(){setLoading(false);});
     }
@@ -41,6 +50,17 @@
         .then(function(body){setCatalogs(function(prev){return Object.assign({},prev,{[kind]:body.models || []});});})
         .catch(function(e){setFeedback(String(e.message || e));});
     }
+    function updateFilter(name,value){setFilters(old=>({...old,[name]:value}));setDiscovery(null);setPage(0);}
+    function toggleFilter(name,value,checked){updateFilter(name,checked?[...new Set([...filters[name],value])]:filters[name].filter(x=>x!==value));}
+    function check(label,checked,change){return h('label',{key:label,className:'flex gap-2 items-center text-sm'},h('input',{type:'checkbox',checked,disabled:loading,onChange:e=>change(e.target.checked)}),label);}
+    function discoverAll(){
+      if(loading||!filters.kinds.length)return;
+      setLoading(true);setDiscovery(null);setPage(0);setFeedback('');
+      SDK.fetchJSON(base+'/discover-models',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(filters)})
+        .then(r=>{if(!r||!Array.isArray(r.models))throw Error('Invalid catalog');setDiscovery(r);})
+        .catch(()=>setFeedback('Não foi possível consultar o catálogo. Confira a conexão e o token de leitura.'))
+        .finally(()=>setLoading(false));
+    }
     return h('div', {className:'space-y-4 max-w-3xl'},
       h(C.Card, null,
         h(C.CardHeader, null, h(C.CardTitle, null, 'OmniRoute connection')),
@@ -48,8 +68,34 @@
           h('p', {className:'text-sm mb-3'}, 'Private endpoint; credentials are saved by Hermes and never returned to this page.'),
           Field('API base URL (/v1 or /api/v1)', h(C.Input, {value:currentUrl, onChange:function(e){setUrl(e.target.value)}, placeholder:'https://your-router.example/v1'})),
           Field('Replace API key (leave empty to keep existing)', h(C.Input, {type:'password', autoComplete:'new-password', value:key, onChange:function(e){setKey(e.target.value);}, placeholder:'Key configured: ' + (state && state.api_key_configured ? 'yes':'no')})),
-          h(C.Button, {disabled:loading, onClick:function(){send('/connection',{base_url:currentUrl, api_key:key}, 'Connection saved');}}, 'Save connection'),
+          Field('Token de leitura (opcional)',h(C.Input,{type:'password',value:readToken,autoComplete:'new-password',onChange:e=>setReadToken(e.target.value),placeholder:state?.read_token_configured?'Configurado':'Não configurado'})),
+          h(C.Button, {disabled:loading, onClick:function(){send('/connection',{base_url:currentUrl, api_key:key,read_token:readToken}, 'Connection saved');}}, 'Save connection'),
           h('p', {className:'text-xs mt-2'}, 'All settings are managed by Hermes for the selected profile. The chat provider changes only when you activate it explicitly.')
+        )
+      ),
+      h(C.Card, null,
+        h(C.CardHeader,null,h(C.CardTitle,null,'Catálogo geral — Model Discovery')),
+        h(C.CardContent,null,
+          Field('Pesquisa',h(C.Input,{value:filters.q,maxLength:200,disabled:loading,onChange:e=>updateFilter('q',e.target.value)})),
+          ...[['configured_only','Somente configurados'],['free_only','Somente catalogados como gratuitos'],['include_combos','Incluir Combos e Auto-Combos']].map(([k,l])=>check(l,filters[k],v=>updateFilter(k,v))),
+          h('h3',null,'Tipos de modelo'),
+          check('Todos os tipos',filters.kinds.length===DISCOVERY_TYPES.length,v=>updateFilter('kinds',v?DISCOVERY_TYPES.map(x=>x[0]):[])),
+          h('div',{className:'grid grid-cols-2 gap-1'},DISCOVERY_TYPES.map(([k,l])=>check(l,filters.kinds.includes(k),v=>toggleFilter('kinds',k,v)))),
+          h('h3',null,'Capacidades'),
+          check('Qualquer capacidade (sem restrição)',filters.capabilities.length===0,v=>updateFilter('capabilities',v?[]:['tool_calling'])),
+          check('Selecionar todas as capacidades',filters.capabilities.length===DISCOVERY_CAPABILITIES.length,v=>updateFilter('capabilities',v?DISCOVERY_CAPABILITIES.map(x=>x[0]):[])),
+          h('div',{className:'grid grid-cols-2 gap-1'},DISCOVERY_CAPABILITIES.map(([k,l])=>check(l,filters.capabilities.includes(k),v=>toggleFilter('capabilities',k,v)))),
+          Field('Correspondência',h('select',{value:filters.match,disabled:loading,onChange:e=>updateFilter('match',e.target.value)},h('option',{value:'and'},'Todas (AND)'),h('option',{value:'or'},'Pelo menos uma (OR)'))),
+          Field('Contexto mínimo',h('select',{value:filters.min_context,disabled:loading,onChange:e=>updateFilter('min_context',Number(e.target.value))},[0,32768,65536,131072,262144,524288,1048576].map(n=>h('option',{key:n,value:n},n?n+' tokens':'Sem restrição')))),
+          h(C.Button,{disabled:loading||!filters.kinds.length,onClick:discoverAll},'Consultar catálogo'),
+          h(C.Button,{disabled:loading,onClick:()=>{setFilters(initialDiscovery());setDiscovery(null);setPage(0);}},'Restaurar filtros'),
+          !filters.kinds.length&&h('p',null,'Nenhum tipo selecionado.'),
+          discovery&&h('div',null,h('p',null,discovery.models.length+' modelo(s) encontrados'),
+            (discovery.warnings||[]).map((w,i)=>h('p',{key:i,className:'text-xs'},String(w))),
+            discovery.free_summary&&h('p',{className:'text-xs'},'Catálogo global: '+String(discovery.free_summary.modelCount??'—')+' ofertas; não é saldo da conta.'),
+            discovery.models.slice(page*50,page*50+50).map(m=>h('div',{key:m.id,className:'border-b py-2'},h('div',null,m.label),h('div',{className:'text-xs break-all'},m.id+' · '+m.kind+(m.free_type?' · '+m.free_type:'')+(m.provider_state?' · '+m.provider_state:'')),['chat','image','video'].includes(m.kind)&&h(C.Button,{disabled:loading,onClick:()=>setSelections(old=>({...old,[m.kind]:m.id}))},'Usar no campo '+m.kind+' (salvar abaixo)'))),
+            h(C.Button,{disabled:page===0||loading,onClick:()=>setPage(p=>p-1)},'Anterior'),
+            h(C.Button,{disabled:(page+1)*50>=discovery.models.length||loading,onClick:()=>setPage(p=>p+1)},'Próxima'))
         )
       ),
       h(C.Card, null,

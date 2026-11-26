@@ -18,6 +18,11 @@ const CATEGORIES = Object.freeze([
   ['stt', 'Transcrição de voz (STT)'],
 ])
 
+
+const DISCOVERY_TYPES = [['chat','LLM / Chat'],['embedding','Embeddings'],['image','Imagem'],['audio','Áudio'],['video','Vídeo'],['rerank','Reranking'],['moderation','Moderação'],['music','Música']]
+const DISCOVERY_CAPABILITIES = [['tool_calling','Tool calling'],['reasoning','Raciocínio'],['thinking','Thinking'],['vision','Visão'],['structured_output','Saída estruturada'],['attachment','Anexos'],['temperature','Temperatura']]
+const initialDiscovery = () => ({kinds: DISCOVERY_TYPES.map(x=>x[0]), capabilities: [], match:'and', configured_only:true, free_only:false, include_combos:true, min_context:0, q:''})
+
 const PREFERENCES = Object.freeze([
   ['tts_voice', 'Voz TTS específica do provedor'],
   ['search_provider', 'Provedor de pesquisa (opcional)'],
@@ -83,6 +88,10 @@ function OmniRouteSettings({ rest }) {
   const [url, setUrl] = useState('')
   // Never persist this field in browser-side caches or query parameters.
   const [replacementKey, setReplacementKey] = useState('')
+  const [readToken, setReadToken] = useState('')
+  const [filters, setFilters] = useState(initialDiscovery())
+  const [discovery, setDiscovery] = useState(null)
+  const [page, setPage] = useState(0)
   const [models, setModels] = useState({})
   const [preferences, setPreferences] = useState({})
   const [catalogs, setCatalogs] = useState({})
@@ -115,12 +124,14 @@ function OmniRouteSettings({ rest }) {
       const response = await rest(path, { method: 'POST', body })
       incorporateStatus(response)
       setReplacementKey('')
+      setReadToken('')
       setFeedback(success + ' Reinicie/recarregue o Hermes se necessário.')
     } catch (error) {
       setFeedback(errorText(error))
     } finally {
       // Also clear a failed replacement credential so it isn't kept in state.
       setReplacementKey('')
+      setReadToken('')
       setBusy(false)
     }
   }
@@ -159,6 +170,30 @@ function OmniRouteSettings({ rest }) {
     }
   }
 
+
+  function updateFilter(name, value) {
+    setFilters(old => ({...old, [name]: value}))
+    setDiscovery(null)
+    setPage(0)
+  }
+  function toggleFilter(name, value, checked) {
+    updateFilter(name, checked ? [...new Set([...filters[name], value])] : filters[name].filter(x=>x!==value))
+  }
+  function checkbox(label, checked, onChange) {
+    return jsx('label', {className:'flex gap-2 items-center text-sm', children: [
+      jsx('input', {type:'checkbox', checked, disabled:busy, onChange:e=>onChange(e.target.checked)}), label
+    ]}, label)
+  }
+  async function discoverAll() {
+    if (busy || !filters.kinds.length) return
+    setBusy(true); setDiscovery(null); setPage(0); setFeedback('')
+    try {
+      const result = await rest('/discover-models', {method:'POST', body:filters})
+      if (!result || !Array.isArray(result.models)) throw new Error('Invalid catalog')
+      setDiscovery(result)
+    } catch (e) { setFeedback(errorText(e)) }
+    finally { setBusy(false) }
+  }
   const configured = !!(state && state.api_key_configured)
   const selectedChat = !!(models.chat && String(models.chat).trim())
 
@@ -192,12 +227,16 @@ function OmniRouteSettings({ rest }) {
               autoComplete: 'new-password',
             }),
           }),
+          jsx(Field, {label:'Token de leitura (opcional; deixe vazio para manter)', children:jsx(TextField,{
+            type:'password', value:readToken, onChange:e=>setReadToken(e.target.value),
+            autoComplete:'new-password', placeholder:state?.read_token_configured?'Token configurado':'Token não configurado'
+          })}),
           jsxs('div', {
             className: 'flex flex-wrap items-center gap-2',
             children: [
               jsx(Action, {
-                disabled: busy || !(url.trim() || replacementKey),
-                onClick: () => submit('/connection', { base_url: url.trim(), api_key: replacementKey }, 'Conexão salva.'),
+                disabled: busy || !(url.trim() || replacementKey || readToken),
+                onClick: () => submit('/connection', { base_url: url.trim(), api_key: replacementKey, read_token:readToken }, 'Conexão salva.'),
                 children: 'Salvar conexão',
               }),
               jsx(Action, {
@@ -212,6 +251,38 @@ function OmniRouteSettings({ rest }) {
             ],
           }),
         ] }),
+      }),
+      jsx(Section, {
+        title:'Catálogo geral — Model Discovery',
+        children:jsxs('div',{className:'space-y-2',children:[
+          jsx(Field,{label:'Pesquisa',children:jsx(TextField,{value:filters.q,maxLength:200,disabled:busy,onChange:e=>updateFilter('q',e.target.value)})}),
+          ...[['configured_only','Somente configurados'],['free_only','Somente catalogados como gratuitos'],['include_combos','Incluir Combos e Auto-Combos']].map(([k,l])=>checkbox(l,filters[k],v=>updateFilter(k,v))),
+          jsx(Title,{children:'Tipos de modelo'}),
+          checkbox('Todos os tipos',filters.kinds.length===DISCOVERY_TYPES.length,v=>updateFilter('kinds',v?DISCOVERY_TYPES.map(x=>x[0]):[])),
+          jsx('div',{className:'grid grid-cols-2 gap-1',children:DISCOVERY_TYPES.map(([k,l])=>checkbox(l,filters.kinds.includes(k),v=>toggleFilter('kinds',k,v)))}),
+          jsx(Title,{children:'Capacidades'}),
+          checkbox('Qualquer capacidade (sem restrição)',filters.capabilities.length===0,v=>updateFilter('capabilities',v?[]:['tool_calling'])),
+          checkbox('Selecionar todas as capacidades',filters.capabilities.length===DISCOVERY_CAPABILITIES.length,v=>updateFilter('capabilities',v?DISCOVERY_CAPABILITIES.map(x=>x[0]):[])),
+          jsx('div',{className:'grid grid-cols-2 gap-1',children:DISCOVERY_CAPABILITIES.map(([k,l])=>checkbox(l,filters.capabilities.includes(k),v=>toggleFilter('capabilities',k,v)))}),
+          jsx(Field,{label:'Correspondência',children:jsxs('select',{value:filters.match,disabled:busy,onChange:e=>updateFilter('match',e.target.value),children:[
+            jsx('option',{value:'and',children:'Todas as selecionadas (AND)'}),jsx('option',{value:'or',children:'Pelo menos uma (OR)'})
+          ]})}),
+          jsx(Field,{label:'Contexto mínimo',children:jsx('select',{value:filters.min_context,disabled:busy,onChange:e=>updateFilter('min_context',Number(e.target.value)),children:[0,32768,65536,131072,262144,524288,1048576].map(n=>jsx('option',{value:n,children:n?String(n)+' tokens':'Sem restrição'},n))})}),
+          jsx(Action,{disabled:busy||!filters.kinds.length,onClick:discoverAll,children:'Consultar catálogo'}),
+          jsx(Action,{disabled:busy,onClick:()=>{setFilters(initialDiscovery());setDiscovery(null);setPage(0)},children:'Restaurar filtros'}),
+          !filters.kinds.length&&jsx('p',{children:'Nenhum tipo selecionado.'}),
+          discovery&&jsxs('div',{children:[
+            jsx('p',{children:discovery.models.length+' modelo(s) encontrados'}),
+            ...(discovery.warnings||[]).map((w,i)=>jsx('p',{className:'text-xs',children:String(w)},i)),
+            discovery.free_summary&&jsx('p',{className:'text-xs',children:'Catálogo global: '+String(discovery.free_summary.modelCount??'—')+' ofertas; não é saldo da conta.'}),
+            ...discovery.models.slice(page*50,page*50+50).map(m=>jsxs('div',{className:'border-b py-2',children:[
+              jsx('div',{children:m.label}),jsx('div',{className:'text-xs break-all',children:m.id+' · '+m.kind+(m.free_type?' · '+m.free_type:'')+(m.provider_state?' · '+m.provider_state:'')}),
+              ['chat','image','video'].includes(m.kind)&&jsx(Action,{disabled:busy,onClick:()=>setModels(old=>({...old,[m.kind]:m.id})),children:'Usar no campo '+m.kind+' (salvar abaixo)'})
+            ]},m.id)),
+            jsx(Action,{disabled:page===0||busy,onClick:()=>setPage(p=>p-1),children:'Anterior'}),
+            jsx(Action,{disabled:(page+1)*50>=discovery.models.length||busy,onClick:()=>setPage(p=>p+1),children:'Próxima'})
+          ]})
+        ]})
       }),
       jsx(Section, {
         title: 'Seleção de modelos',
