@@ -38,7 +38,15 @@
     }
     function showModels(kind) {
       SDK.fetchJSON(base + '/models?kind=' + encodeURIComponent(kind))
-        .then(function(body){setCatalogs(function(prev){return Object.assign({},prev,{[kind]:body.models || []});});})
+        .then(function(body){
+          setCatalogs(function(prev){return Object.assign({},prev,{[kind]:body.models || []});});
+          var d = body.diagnostics, c = d && d.classified;
+          if (d && c) setFeedback('Catalog ' + kind + ': ' + d.received + ' received; chat ' + c.chat +
+            ', image ' + c.image + ', video ' + c.video + ', TTS ' + c.tts + ', STT ' + c.stt +
+            ', combos ' + d.combos + ', other ' + d.other + '; duplicates removed ' + d.duplicates_removed +
+            '; delivered ' + d.delivered + '; ' + d.pages + ' pages / ' + d.requests + ' requests; ' +
+            d.duration_ms + ' ms; source ' + d.source + '.');
+        })
         .catch(function(e){setFeedback(String(e.message || e));});
     }
     return h('div', {className:'space-y-4 max-w-3xl'},

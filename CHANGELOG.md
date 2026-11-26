@@ -6,6 +6,9 @@
 - Register the Hermes v0.23.2 provider-owned catalog hook and base-URL environment metadata without a global endpoint or credential. Do not replace an explicitly empty key with another credential.
 - Log sanitized discovery failures, reduce successful media cache TTL to 60 seconds, and do not cache failed catalogs.
 - Add offline regression coverage for large catalogs, cursor handling, modality segregation, and independent package parity. Hermes Desktop's initial 50-model visibility setting remains unchanged.
+- Centralize catalog discovery in one maintained backend source; generate and verify an identical standalone provider copy.
+- Expose sanitized, structured catalog diagnostics in both plugin UIs and native/backend logs, including API/cache origin and delivered counts.
+- Regenerate and verify the tracked-source SHA-256 manifest in CI.
 - Candidate release; live deployment and official validator results must be checked separately.
 
 ## 0.4.0-beta.1 — Native Hermes Desktop settings

@@ -161,3 +161,11 @@ See [official submission rules](https://github.com/NousResearch/hermes-agent/blo
 ## License and credit
 
 MIT license. Original code created from public API contracts and official Hermes plugin extension points. 
+
+### Catalog maintenance and diagnostics
+
+`backend/catalog_discovery.py` is the sole maintained source of catalog pagination, classification, deduplication and telemetry. The independent `model-provider/` package contains a generated, byte-identical copy, because Hermes installs each subdirectory separately. Do not edit the generated copy; run `python scripts/sync_catalog.py` and commit the result. CI verifies the copy.
+
+The plugin's `GET /models?kind=chat` dashboard API includes an additive `diagnostics` object, and the Desktop/Dashboard Discover action displays the metrics. Native chat and backend media also emit structured INFO logs (WARNING on discovery failure). Fields: `source` (api/cache), `status`, `received`, `classified` by modality, `combos`, `other`, `duplicates_removed`, `delivered`, `pages`, `requests`, `duration_ms`, and sanitized `error`. Counts describe the queried endpoint, not the entire OmniRoute deployment; classifications can overlap, and a combo can also count as chat. Duplicate counts apply to the selected modality. Delivered means IDs emitted by the plugin, not the number Hermes chooses to display. Cache hits show zero network pages/requests; native Hermes's separate cache remains manually refreshable. No keys, base URLs, model IDs or raw upstream messages are logged in these metrics.
+
+Before committing release changes, stage all new source files and run `python scripts/release_checksums.py` in an LF checkout. Verify with `python scripts/release_checksums.py --check`. The SHA-256 manifest covers every tracked file except itself; CI checks it.

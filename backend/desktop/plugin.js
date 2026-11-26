@@ -151,7 +151,17 @@ function OmniRouteSettings({ rest }) {
         .filter(item => item && typeof item.id === 'string' && item.id.length <= 256)
         .map(item => ({ id: item.id, label: String(item.label || item.id).slice(0, 256) }))
       setCatalogs(previous => ({ ...previous, [kind]: rows }))
-      setFeedback('Catálogo de ' + kind + ': ' + rows.length + ' modelo(s).')
+      const info = response.diagnostics
+      const counts = info && info.classified
+      setFeedback(info && counts
+        ? 'Catálogo de ' + kind + ': ' + rows.length + ' exibidos; ' +
+          info.received + ' recebidos; chat ' + counts.chat + ', imagem ' + counts.image +
+          ', vídeo ' + counts.video + ', TTS ' + counts.tts + ', STT ' + counts.stt +
+          ', combos ' + info.combos + ', outros ' + info.other +
+          '; duplicatas ' + info.duplicates_removed + '; entregues pela API do plugin ' + info.delivered +
+          '; ' + info.pages + ' páginas / ' + info.requests + ' requisições; ' +
+          info.duration_ms + ' ms; origem ' + info.source + '.'
+        : 'Catálogo de ' + kind + ': ' + rows.length + ' modelo(s).')
     } catch (error) {
       setFeedback(errorText(error))
     } finally {

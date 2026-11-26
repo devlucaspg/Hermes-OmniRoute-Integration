@@ -184,3 +184,11 @@ Para publicação no catálogo oficial, os dois manifests devem ser apresentados
 ## Licença e créditos
 
 Licença MIT. Implementação original baseada em contratos públicos de API e pontos de extensão oficiais do Hermes. 
+
+### Manutenção e diagnóstico do catálogo
+
+`backend/catalog_discovery.py` é a única fonte mantida da lógica de paginação, classificação, deduplicação e telemetria. O pacote independente `model-provider/` contém uma cópia gerada byte a byte, pois o Hermes instala cada subdiretório separadamente. Não edite a cópia: execute `python scripts/sync_catalog.py` e versione o resultado. A CI verifica sua igualdade.
+
+A API do painel `GET /models?kind=chat` inclui o objeto adicional `diagnostics`; a ação Discover no Desktop/Dashboard exibe os indicadores. O provedor nativo e o backend também registram logs estruturados em INFO (WARNING nas falhas). Campos: `source` (api/cache), `status`, `received`, `classified` por modalidade, `combos`, `other`, `duplicates_removed`, `delivered`, `pages`, `requests`, `duration_ms` e `error` sanitizado. As contagens referem-se ao endpoint consultado, não ao OmniRoute inteiro; modalidades podem se sobrepor e combos podem contar também como chat. Duplicatas referem-se à modalidade selecionada. Entregues significa IDs emitidos pelo plugin, não a quantidade exibida pelo Hermes. No cache, páginas/requisições de rede são zero; o cache nativo do Hermes mantém a atualização manual. Nenhuma chave, URL de conexão, ID de modelo ou mensagem bruta do upstream é registrada nessa telemetria.
+
+Antes de versionar uma release, adicione ao Git os novos arquivos e execute `python scripts/release_checksums.py` em checkout com finais de linha LF. Verifique com `python scripts/release_checksums.py --check`. O manifesto SHA-256 cobre todos os arquivos rastreados, exceto ele próprio; a CI verifica a integridade.

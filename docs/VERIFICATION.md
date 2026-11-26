@@ -83,3 +83,7 @@ These checks do **not** assert that the plugin passes the Hermes admission scann
 ### Revision 0.3.2-beta.1 validation limits
 
 Adversarial STT multipart and TTS audio format tests were added, as well as a mock FastAPI dashboard showing explicit chat activation and profile segregation. These tests are **not** the actual Hermes security scanner or a live installation. The official composite action is configured but did not execute in this environment (no Hermes runtime and no GitHub network access). The two catalog templates cannot be finalized before public GitHub commit and maintainer review.
+
+## 0.4.0-beta.2 — additional catalog gates
+
+Run `python scripts/sync_catalog.py --check` and `python scripts/release_checksums.py --check` before validation. CI verifies byte-identical generated provider source and all tracked source SHA-256 digests. The dashboard exposes per-discovery diagnostics and native/backend adapters log sanitized statistics. Manual Hermes refresh remains supported and unchanged; specialty pagination and timeout policy are unchanged. Live integration still requires the actual OmniRoute instance.
