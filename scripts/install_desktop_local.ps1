@@ -4,7 +4,7 @@
 #   powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install_desktop_local.ps1
 [CmdletBinding()]
 param(
-    [string] $HermesHome = $(if ($env:HERMES_HOME) { $env:HERMES_HOME } else { Join-Path $HOME '.hermes' })
+    [string] $HermesHome = $(Join-Path $env:LOCALAPPDATA 'hermes')
 )
 $ErrorActionPreference = 'Stop'
 $Source = Join-Path (Split-Path -Parent $PSScriptRoot) 'backend\desktop\plugin.js'
@@ -12,6 +12,9 @@ if (-not (Test-Path -LiteralPath $Source -PathType Leaf)) {
     throw "Arquivo da interface Desktop não encontrado: $Source"
 }
 $PluginsRoot = Join-Path $HermesHome 'desktop-plugins'
+if (-not (Test-Path -LiteralPath $PluginsRoot -PathType Container)) {
+    throw "Diretorio de plugins Desktop nao encontrado: $PluginsRoot. Abra a pasta de plugins pelo Hermes Desktop e informe o diretorio pai com -HermesHome."
+}
 $Target = Join-Path $PluginsRoot 'omniroute-media'
 $TargetFile = Join-Path $Target 'plugin.js'
 $Stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
