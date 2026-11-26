@@ -2,10 +2,10 @@
   "use strict";
   var SDK = window.__HERMES_PLUGIN_SDK__;
   if (!SDK || !window.__HERMES_PLUGINS__) return;
-  var UI_VERSION = '0.4.0-beta.5';
+  var UI_VERSION = '0.4.0-beta.6';
   // Dashboard's --foreground can be transparent; use the opaque base tokens.
   var SELECT_COLORS = {backgroundColor:'var(--background-base, Canvas)',color:'var(--midground-base, CanvasText)',colorScheme:'light dark'};
-  var contextLabel = n => n ? Math.round(n / 1000).toLocaleString('pt-BR') + ' mil tokens' : 'Sem restrição';
+  var contextLabel = n => n ? Math.floor(n / 1000).toLocaleString('pt-BR') + ' mil tokens' : 'Sem restrição';
   var React = SDK.React;
   var h = React.createElement;
   var C = SDK.components;

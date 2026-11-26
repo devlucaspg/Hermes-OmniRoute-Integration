@@ -174,7 +174,7 @@ class Discovery(unittest.TestCase):
     def test_status_reports_installed_backend_version(self):
         with patch.object(api,'_value',return_value=''), patch.object(api,'_secret',return_value=''), patch.object(api,'_native_model_is_omniroute',return_value=False):
             result=api.status()
-        self.assertEqual(result['plugin_version'],'0.4.0-beta.5')
+        self.assertEqual(result['plugin_version'],'0.4.0-beta.6')
 
 
     def test_picker_selection_profile_endpoint_and_empty(self):

@@ -1,3 +1,7 @@
+## 0.4.0-beta.6 — Round context labels down
+
+- Display context limits using the lower whole thousand while preserving exact numeric API values in Desktop and Dashboard.
+
 ## 0.4.0-beta.5 — Readable dropdowns and rounded context labels
 
 - Use explicit theme foreground and background for native selects and options on Desktop and Dashboard, including model selectors.

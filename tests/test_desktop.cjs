@@ -245,7 +245,7 @@ test('Desktop footer identifies its own version independently of remote backend'
   const footer=c.flatten(c.render()).find(n=>n.type==='footer');
   assert.ok(footer);
   const content=JSON.stringify(footer);
-  assert.ok(content.includes('Interface Desktop v0.4.0-beta.5'));
+  assert.ok(content.includes('Interface Desktop v0.4.0-beta.6'));
   assert.ok(content.includes('Backend conectado: v0.4.0-beta.2'));
   assert.ok(content.includes('Versões diferentes'));
 });
@@ -282,7 +282,7 @@ test('all Desktop native dropdown options use explicit theme colors; context lab
     }
   }
   const options=nodes.filter(n=>n.type==='option');
-  for(const [value,label] of [[32768,'33 mil tokens'],[65536,'66 mil tokens'],[1048576,'1.049 mil tokens']]) {
+  for(const [value,label] of [[32768,'32 mil tokens'],[65536,'65 mil tokens'],[131072,'131 mil tokens'],[262144,'262 mil tokens'],[524288,'524 mil tokens'],[1048576,'1.048 mil tokens']]) {
     const option=options.find(n=>n.props.value===value);
     assert.equal(option.props.children,label);
   }

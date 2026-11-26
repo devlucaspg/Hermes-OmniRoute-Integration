@@ -3,7 +3,7 @@
   "label": "OmniRoute",
   "description": "Configure a private OmniRoute API and pick LLM/media models",
   "icon": "Settings",
-  "version": "0.4.0-beta.5",
+  "version": "0.4.0-beta.6",
   "tab": {
     "path": "/omniroute-media",
     "position": "after:plugins"

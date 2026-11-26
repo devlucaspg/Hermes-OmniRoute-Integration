@@ -10,7 +10,7 @@ import { useEffect, useState } from 'react'
 import { jsx, jsxs } from 'react/jsx-runtime'
 import * as sdk from '@hermes/plugin-sdk'
 
-const UI_VERSION = '0.4.0-beta.5'
+const UI_VERSION = '0.4.0-beta.6'
 
 // The host declares color-scheme: light even for custom dark palettes.
 // Explicit opaque foreground AND background prevent pale text on the
@@ -21,7 +21,7 @@ const SELECT_COLORS = {
   colorScheme: 'light dark',
 }
 const SELECT_STYLE = { ...SELECT_COLORS, borderColor: 'var(--ui-stroke-secondary)' }
-const contextLabel = n => n ? Math.round(n / 1000).toLocaleString('pt-BR') + ' mil tokens' : 'Sem restrição'
+const contextLabel = n => n ? Math.floor(n / 1000).toLocaleString('pt-BR') + ' mil tokens' : 'Sem restrição'
 
 const CATEGORIES = Object.freeze([
   ['chat', 'LLM / Chat'],
