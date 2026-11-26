@@ -85,6 +85,17 @@ class OmniRouteProfile(ProviderProfile):
         key = api_key if api_key is not None else (_env('OMNIROUTE_API_KEY') if root == scoped_root else '')
         if not key:
             return None
+        # The provider hook and configured-relay path both call fetch_models.
+        try:
+            from hermes_constants import get_hermes_home
+            saved = _catalog_module.read_picker_selection(get_hermes_home(), root)
+            if saved is not None:
+                return saved['ids']
+        except ImportError:
+            pass
+        except CatalogError as exc:
+            logging.getLogger(__name__).warning('OmniRoute picker: %s', exc)
+            return []
         stats = new_diagnostics()
         try:
             http = request.build_opener(request.ProxyHandler({}), _NoRedirect())

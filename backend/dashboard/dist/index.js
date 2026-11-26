@@ -2,7 +2,7 @@
   "use strict";
   var SDK = window.__HERMES_PLUGIN_SDK__;
   if (!SDK || !window.__HERMES_PLUGINS__) return;
-  var UI_VERSION = '0.4.0-beta.3';
+  var UI_VERSION = '0.4.0-beta.4';
   var React = SDK.React;
   var h = React.createElement;
   var C = SDK.components;
@@ -36,14 +36,14 @@ const initialDiscovery = () => ({kinds: DISCOVERY_TYPES.map(x=>x[0]), capabiliti
     var busy = React.useState(false), loading = busy[0], setLoading = busy[1];
     function refresh() {
       SDK.fetchJSON(base + '/status').then(function (s) {
-        setState(s); setUrl(s.base_url || ''); setSelections(s.models || {}); setPreferences(s.preferences || {});
+        setState(s); setFilters(s.picker_filters?{...initialDiscovery(),...s.picker_filters}:initialDiscovery()); setUrl(s.base_url || ''); setSelections(s.models || {}); setPreferences(s.preferences || {});
       }).catch(function(e){setFeedback('Operação OmniRoute falhou. Confira a conexão e as permissões.');});
     }
     React.useEffect(refresh, []);
     function send(path, data, ok) {
       setLoading(true); setFeedback('');
       SDK.fetchJSON(base + path, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)})
-        .then(function(s){setState(s); setKey(''); setReadToken('');setClearReadToken(false); setDiscovery(null); setPage(0); setFeedback(ok + ' (a Hermes reload may be needed).');})
+        .then(function(s){setState(s);setFilters(s.picker_filters?{...initialDiscovery(),...s.picker_filters}:initialDiscovery()); setKey(''); setReadToken('');setClearReadToken(false); setDiscovery(null); setPage(0); setFeedback(ok + ' (a Hermes reload may be needed).');})
         .catch(function(e){setFeedback('Operação OmniRoute falhou. Confira a conexão e as permissões.');})
         .finally(function(){setKey('');setReadToken('');setClearReadToken(false);setLoading(false);});
     }
@@ -66,8 +66,8 @@ const initialDiscovery = () => ({kinds: DISCOVERY_TYPES.map(x=>x[0]), capabiliti
     function discoverAll(){
       if(loading||!filters.kinds.length)return;
       setLoading(true);setDiscovery(null);setPage(0);setFeedback('');
-      SDK.fetchJSON(base+'/discover-models',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(filters)})
-        .then(r=>{if(!r||!Array.isArray(r.models))throw Error('Invalid catalog');setDiscovery(r);})
+      SDK.fetchJSON(base+'/discover-models',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...filters,apply_to_picker:true})})
+        .then(r=>{if(!r||!Array.isArray(r.models))throw Error('Invalid catalog');setDiscovery(r);if(Number.isInteger(r.picker_count)){setState(old=>({...old,picker_count:r.picker_count,picker_filters:r.picker_filters}));setFeedback(r.picker_count+' modelo(s) de chat aplicados. Use Atualizar modelos no seletor da conversa.');}})
         .catch(()=>setFeedback('Não foi possível consultar o catálogo. Confira a conexão e o token de leitura.'))
         .finally(()=>setLoading(false));
     }
@@ -99,6 +99,8 @@ const initialDiscovery = () => ({kinds: DISCOVERY_TYPES.map(x=>x[0]), capabiliti
           Field('Correspondência',h('select',{value:filters.match,disabled:loading,onChange:e=>updateFilter('match',e.target.value)},h('option',{value:'and'},'Todas (AND)'),h('option',{value:'or'},'Pelo menos uma (OR)'))),
           Field('Contexto mínimo',h('select',{value:filters.min_context,disabled:loading,onChange:e=>updateFilter('min_context',Number(e.target.value))},[0,32768,65536,131072,262144,524288,1048576].map(n=>h('option',{key:n,value:n},n?n+' tokens':'Sem restrição')))),
           h(C.Button,{disabled:loading||!filters.kinds.length,onClick:discoverAll},'Consultar catálogo'),
+          h('p',{className:'text-xs'},'A consulta bem-sucedida aplica os modelos de chat ao seletor da conversa. Use Atualizar modelos no seletor.'),
+          Number.isInteger(state?.picker_count)&&h('p',{className:'text-xs'},'Catálogo aplicado: '+state.picker_count+' modelo(s) de chat.'),
           h(C.Button,{disabled:loading,onClick:()=>{setFilters(initialDiscovery());setDiscovery(null);setPage(0);}},'Restaurar filtros'),
           !filters.kinds.length&&h('p',null,'Nenhum tipo selecionado.'),
           discovery&&h('div',null,h('p',null,discovery.models.length+' modelo(s) encontrados'),

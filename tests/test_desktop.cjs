@@ -210,6 +210,7 @@ test('discovery multi-select sends explicit filters and does not activate chat',
   assert.equal(JSON.stringify(call.options.body.kinds),JSON.stringify(['chat','embedding']));
   assert.equal(JSON.stringify(call.options.body.capabilities),JSON.stringify(['tool_calling','vision']));
   assert.equal(call.options.body.match,'or');
+  assert.equal(call.options.body.apply_to_picker,true);
   assert.equal(c.calls.some(x=>x.endpoint==='/activate-chat'),false);
   assert.ok(JSON.stringify(c.render()).includes('p/llm'));
 });
@@ -232,7 +233,7 @@ test('Dashboard multi-select uses authenticated plugin REST and preserves routin
   const query=flatten(render()).find(n=>n.type==='Button'&&n.props.children.includes('Consultar catálogo'));
   query.props.onClick();await tick();
   const call=calls.at(-1);assert.ok(call.url.endsWith('/discover-models'));assert.equal(call.options.method,'POST');
-  const body=JSON.parse(call.options.body);assert.deepEqual(body.kinds,['chat','image']);assert.deepEqual(body.capabilities,['tool_calling']);
+  const body=JSON.parse(call.options.body);assert.deepEqual(body.kinds,['chat','image']);assert.deepEqual(body.capabilities,['tool_calling']);assert.equal(body.apply_to_picker,true);
   assert.ok(JSON.stringify(render()).includes('provider/org/model'));
   assert.equal(calls.some(x=>x.url.endsWith('/activate-chat')),false);
 });
@@ -244,7 +245,7 @@ test('Desktop footer identifies its own version independently of remote backend'
   const footer=c.flatten(c.render()).find(n=>n.type==='footer');
   assert.ok(footer);
   const content=JSON.stringify(footer);
-  assert.ok(content.includes('Interface Desktop v0.4.0-beta.3'));
+  assert.ok(content.includes('Interface Desktop v0.4.0-beta.4'));
   assert.ok(content.includes('Backend conectado: v0.4.0-beta.2'));
   assert.ok(content.includes('Versões diferentes'));
 });

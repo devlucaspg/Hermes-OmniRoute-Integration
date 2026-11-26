@@ -20,7 +20,7 @@ import ipaddress
 
 router = APIRouter()
 
-PLUGIN_VERSION = '0.4.0-beta.3'
+PLUGIN_VERSION = '0.4.0-beta.4'
 
 KINDS = {
     'chat': 'OMNIROUTE_CHAT_MODEL',
@@ -92,8 +92,10 @@ class ModelSelection(BaseModel):
 
 @router.get('/status')
 def status():
+    selection = _saved_picker_status()
     return {
         'plugin_version': PLUGIN_VERSION,
+        **selection,
         'base_url': _value('OMNIROUTE_BASE_URL'),
         'api_key_configured': bool(_secret('OMNIROUTE_API_KEY')),
         'read_token_configured': bool(_secret('OMNIROUTE_READ_TOKEN')),
@@ -120,6 +122,8 @@ def save_connection(body: Connection):
         raise HTTPException(status_code=422, detail='Replace or clear the read token when changing the endpoint')
     if body.read_token and not (checked or _value('OMNIROUTE_BASE_URL')).startswith('https://'):
         raise HTTPException(status_code=422, detail='Management token requires HTTPS')
+    if (checked and checked != _value('OMNIROUTE_BASE_URL').rstrip('/')) or body.api_key:
+        _clear_applied_picker()
     if checked:
         save_env_value('OMNIROUTE_BASE_URL', checked)
         if _native_model_is_omniroute():
@@ -263,6 +267,45 @@ class DiscoveryFilters(BaseModel):
     include_combos: bool = True
     min_context: int = Field(default=0, ge=0, le=100000000)
     q: str = Field(default='', max_length=200)
+    apply_to_picker: bool = False
+
+
+def _picker_home():
+    from hermes_constants import get_hermes_home
+    return get_hermes_home()
+
+
+def _saved_picker_status():
+    try:
+        saved = _catalog_module.read_picker_selection(_picker_home(), _value('OMNIROUTE_BASE_URL').rstrip('/'))
+    except (ImportError, CatalogError):
+        saved = None
+    return {'picker_filters': saved['filters'] if saved is not None else None,
+            'picker_count': len(saved['ids']) if saved is not None else None}
+
+
+def _invalidate_picker():
+    from hermes_cli.models import clear_provider_models_cache
+    clear_provider_models_cache('omniroute')
+
+
+def _clear_applied_picker():
+    try:
+        _catalog_module.clear_picker_selection(_picker_home())
+        _invalidate_picker()
+    except ImportError:
+        pass
+
+
+def _apply_picker(filters, models, base):
+    ids = [m['id'] for m in models if m['kind'] == 'chat']
+    settings = filters.model_dump(exclude={'apply_to_picker'})
+    try:
+        _catalog_module.write_picker_selection(_picker_home(), base, settings, ids)
+        _invalidate_picker()
+    except (OSError, CatalogError, ImportError):
+        raise HTTPException(status_code=500, detail='Could not apply the conversation catalog') from None
+    return {'picker_count': len(ids), 'picker_filters': settings}
 
 
 def _discovery_query(filters: DiscoveryFilters) -> str:
@@ -460,7 +503,9 @@ def discover_models(filters: DiscoveryFilters):
             warnings.append('Free-tier summary could not be verified; results reflect the baseline catalog only.')
         warnings.append('Cataloged free offers only; account eligibility and zero cost are not guaranteed. Unverified combos excluded.')
     models = _filtered_rows(rows, filters, free, rankings)
+    # Only publish a completed successful discovery, including empty results.
+    selection = _apply_picker(filters, models, base) if filters.apply_to_picker else {}
     stats['delivered'] = len(models)
     log_diagnostics(logging.getLogger(__name__), stats)
     return {'models': models, 'count': len(models), 'warnings': warnings, 'free_summary': summary,
-            'diagnostics': stats}
+            'diagnostics': stats, **selection}

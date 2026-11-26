@@ -64,7 +64,7 @@ def _fetch_pages(root, key, opener, timeout, path, stats, query_params=None):
             try:
                 req = request.Request(url, headers={
                     'Authorization': 'Bearer ' + key, 'Accept': 'application/json',
-                    'User-Agent': 'hermes-omniroute-community/0.4.0-beta.3',
+                    'User-Agent': 'hermes-omniroute-community/0.4.0-beta.4',
                 })
                 with opener.open(req, timeout=min(timeout, remaining)) as response:
                     raw = response.read(max_bytes + 1)
@@ -214,3 +214,63 @@ def log_diagnostics(logger, diagnostics):
     """Structured, sanitized telemetry, including failed discovery attempts."""
     level = logging.WARNING if diagnostics['status'] == 'error' else logging.INFO
     logger.log(level, 'OmniRoute catalog: %s', json.dumps(diagnostics, sort_keys=True))
+
+
+# Profile-local applied catalog. No credentials are persisted.
+def _picker_path(home):
+    from pathlib import Path
+    return Path(home) / 'plugin-data' / 'omniroute-media' / 'picker-selection.json'
+
+
+def _valid_picker_ids(ids):
+    return (isinstance(ids, list) and all(isinstance(x, str) and 0 < len(x) <= 256
+            and not any(ord(c) < 32 or ord(c) == 127 for c in x) for x in ids))
+
+
+def read_picker_selection(home, base):
+    """None means no selection for this endpoint; an empty list is authoritative."""
+    path = _picker_path(home)
+    try:
+        with path.open('rb') as stream:
+            raw = stream.read(16 * 1024 * 1024 + 1)
+        if len(raw) > 16 * 1024 * 1024:
+            raise CatalogError('Saved picker selection exceeds size limit')
+        data = json.loads(raw)
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError, UnicodeError):
+        raise CatalogError('Saved picker selection cannot be read') from None
+    if not isinstance(data, dict) or data.get('schema') != 1:
+        raise CatalogError('Invalid saved picker selection')
+    if data.get('base_url') != base:
+        return None
+    if not _valid_picker_ids(data.get('ids')) or not isinstance(data.get('filters'), dict):
+        raise CatalogError('Invalid saved picker selection')
+    return data
+
+
+def write_picker_selection(home, base, filters, ids):
+    import os
+    import tempfile
+    if not _valid_picker_ids(ids):
+        raise CatalogError('Invalid picker model IDs')
+    path = _picker_path(home)
+    payload = json.dumps({'schema': 1, 'base_url': base, 'filters': filters,
+                          'ids': list(dict.fromkeys(ids))}, ensure_ascii=True).encode()
+    if len(payload) > 16 * 1024 * 1024:
+        raise CatalogError('Saved picker selection exceeds size limit')
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(prefix='.picker-', dir=path.parent)
+    try:
+        with os.fdopen(fd, 'wb') as stream:
+            stream.write(payload)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(tmp, path)
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+
+
+def clear_picker_selection(home):
+    _picker_path(home).unlink(missing_ok=True)

@@ -10,7 +10,7 @@ import { useEffect, useState } from 'react'
 import { jsx, jsxs } from 'react/jsx-runtime'
 import * as sdk from '@hermes/plugin-sdk'
 
-const UI_VERSION = '0.4.0-beta.3'
+const UI_VERSION = '0.4.0-beta.4'
 
 const CATEGORIES = Object.freeze([
   ['chat', 'LLM / Chat'],
@@ -116,6 +116,7 @@ function OmniRouteSettings({ rest }) {
   function incorporateStatus(next) {
     if (!next || typeof next !== 'object') throw new Error('Invalid server status')
     setState(next)
+    setFilters(next.picker_filters ? {...initialDiscovery(), ...next.picker_filters} : initialDiscovery())
     setDiscovery(null)
     setPage(0)
     setUrl(typeof next.base_url === 'string' ? next.base_url : '')
@@ -219,9 +220,13 @@ function OmniRouteSettings({ rest }) {
     if (busy || !filters.kinds.length) return
     setBusy(true); setDiscovery(null); setPage(0); setFeedback('')
     try {
-      const result = await rest('/discover-models', {method:'POST', body:filters})
+      const result = await rest('/discover-models', {method:'POST', body:{...filters,apply_to_picker:true}})
       if (!result || !Array.isArray(result.models)) throw new Error('Invalid catalog')
       setDiscovery(result)
+      if (Number.isInteger(result.picker_count)) {
+        setState(old=>({...old,picker_count:result.picker_count,picker_filters:result.picker_filters}))
+        setFeedback(result.picker_count + ' modelo(s) de chat aplicados. Use Atualizar modelos no seletor da conversa.')
+      }
     } catch (e) { setFeedback(errorText(e)) }
     finally { setBusy(false) }
   }
@@ -301,6 +306,8 @@ function OmniRouteSettings({ rest }) {
           ]})}),
           jsx(Field,{label:'Contexto mínimo',children:jsx('select',{value:filters.min_context,disabled:busy,onChange:e=>updateFilter('min_context',Number(e.target.value)),children:[0,32768,65536,131072,262144,524288,1048576].map(n=>jsx('option',{value:n,children:n?String(n)+' tokens':'Sem restrição'},n))})}),
           jsx(Action,{disabled:busy||!filters.kinds.length,onClick:discoverAll,children:'Consultar catálogo'}),
+          jsx('p',{className:'text-xs',children:'A consulta bem-sucedida aplica automaticamente os modelos de chat ao seletor da conversa. Use Atualizar modelos no seletor para recarregar a lista.'}),
+          Number.isInteger(state?.picker_count)&&jsx('p',{className:'text-xs',children:'Catálogo aplicado: '+state.picker_count+' modelo(s) de chat.'}),
           jsx(Action,{disabled:busy,onClick:()=>{setFilters(initialDiscovery());setDiscovery(null);setPage(0)},children:'Restaurar filtros'}),
           !filters.kinds.length&&jsx('p',{children:'Nenhum tipo selecionado.'}),
           discovery&&jsxs('div',{children:[

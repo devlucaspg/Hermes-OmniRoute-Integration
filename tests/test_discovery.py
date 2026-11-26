@@ -174,4 +174,36 @@ class Discovery(unittest.TestCase):
     def test_status_reports_installed_backend_version(self):
         with patch.object(api,'_value',return_value=''), patch.object(api,'_secret',return_value=''), patch.object(api,'_native_model_is_omniroute',return_value=False):
             result=api.status()
-        self.assertEqual(result['plugin_version'],'0.4.0-beta.3')
+        self.assertEqual(result['plugin_version'],'0.4.0-beta.4')
+
+
+    def test_picker_selection_profile_endpoint_and_empty(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as a, tempfile.TemporaryDirectory() as b:
+            m=api._catalog_module
+            self.assertIsNone(m.read_picker_selection(a,'https://router.example/v1'))
+            m.write_picker_selection(a,'https://router.example/v1',{'kinds':['chat']},['p/org/a','p/org/a'])
+            self.assertEqual(m.read_picker_selection(a,'https://router.example/v1')['ids'],['p/org/a'])
+            self.assertIsNone(m.read_picker_selection(b,'https://router.example/v1'))
+            self.assertIsNone(m.read_picker_selection(a,'https://other.example/v1'))
+            m.write_picker_selection(a,'https://router.example/v1',{'kinds':['image']},[])
+            self.assertEqual(m.read_picker_selection(a,'https://router.example/v1')['ids'],[])
+            m.clear_picker_selection(a)
+            self.assertIsNone(m.read_picker_selection(a,'https://router.example/v1'))
+
+    def test_successful_discovery_applies_only_chat_ids(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as home, patch.object(api,'_picker_home',return_value=home), patch.object(api,'_invalidate_picker') as invalidate, patch.object(api,'_value',return_value='https://router.example/v1'), patch.object(api,'_secret',side_effect=lambda n:'synthetic' if n=='OMNIROUTE_API_KEY' else ''), patch.object(api,'_fetch_catalog',return_value=rows):
+            result=api.discover_models(api.DiscoveryFilters(kinds=['chat','embedding'],capabilities=['tool_calling'],include_combos=False,apply_to_picker=True))
+            saved=api._catalog_module.read_picker_selection(home,'https://router.example/v1')
+            self.assertEqual(saved['ids'],[r['id'] for r in result['models'] if r['kind']=='chat'])
+            self.assertEqual(saved['ids'],['p/org/a','p/org/b','p/org/a-high'])
+            self.assertEqual(result['picker_count'],3)
+            self.assertNotIn('apply_to_picker',saved['filters'])
+            invalidate.assert_called_once_with()
+            with patch.object(api,'_fetch_catalog',side_effect=api.CatalogError('synthetic failure')):
+                with self.assertRaises(HTTPException):
+                    api.discover_models(api.DiscoveryFilters(apply_to_picker=True))
+            self.assertEqual(api._catalog_module.read_picker_selection(home,'https://router.example/v1'),saved)
+            api.discover_models(api.DiscoveryFilters(kinds=['embedding'],apply_to_picker=True))
+            self.assertEqual(api._catalog_module.read_picker_selection(home,'https://router.example/v1')['ids'],[])
