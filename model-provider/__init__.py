@@ -6,7 +6,7 @@ The actual inference transport and tool calling remain Hermes-owned.
 from __future__ import annotations
 
 import ipaddress
-import json
+import logging
 from urllib import request, error, parse
 from providers import register_provider
 from providers.base import ProviderProfile
@@ -24,7 +24,7 @@ def _valid_base(root):
     except ValueError:
         return ''
     if (u.scheme not in ("http", "https") or not u.hostname or u.username is not None
-            or u.password is not None or u.query or u.fragment or not u.path.rstrip("/").endswith(("/v1","/api/v1"))):
+            or u.password is not None or u.query or u.fragment or any(c in root for c in '\r\n\t') or not u.path.rstrip("/").endswith(("/v1","/api/v1"))):
         return ""
     try:
         _ = u.port
@@ -47,6 +47,23 @@ def _env(name):
     return str(value or '').strip()
 
 
+# The Hermes loader may import this entrypoint without a package context.
+# Load the sibling catalog module by absolute file path; do not change sys.path.
+from importlib.util import spec_from_file_location, module_from_spec
+from pathlib import Path
+
+_catalog_spec = spec_from_file_location(__name__ + '_catalog_discovery',
+                                        Path(__file__).resolve().parent / 'catalog_discovery.py')
+_catalog_module = module_from_spec(_catalog_spec)
+_catalog_spec.loader.exec_module(_catalog_module)
+CatalogError = _catalog_module.CatalogError
+_fetch_catalog = _catalog_module._fetch_catalog
+_is_chat = _catalog_module._is_chat
+select_rows = _catalog_module.select_rows
+catalog_diagnostics = _catalog_module.catalog_diagnostics
+new_diagnostics = _catalog_module.new_diagnostics
+log_diagnostics = _catalog_module.log_diagnostics
+
 class OmniRouteProfile(ProviderProfile):
     def build_client_kwargs_extras(self, **context):
         """Supply the profile's self-hosted endpoint unless Hermes has an explicit override.
@@ -57,35 +74,27 @@ class OmniRouteProfile(ProviderProfile):
         root = _valid_base(_env('OMNIROUTE_BASE_URL'))
         return {'base_url': root} if root else {}
 
-    def fetch_models(self, *, api_key=None, base_url=None, timeout=8.0):
-        """Live list. No static/fictitious fallbacks and no redirects."""
-        root = _valid_base(base_url or self.base_url or _env('OMNIROUTE_BASE_URL'))
-        if not root: return None
-        key = api_key or _env('OMNIROUTE_API_KEY')
-        if not key: return None
+    def fetch_models(self, *, api_key=None, base_url=None, timeout=20.0):
+        """Live catalog using the same scoped credentials for every page."""
+        scoped_root = _valid_base(_env('OMNIROUTE_BASE_URL'))
+        root = _valid_base(base_url) if base_url is not None else scoped_root
+        if not root:
+            return None
+        # Explicit empty credentials are a deliberate keyless probe from Hermes.
+        # Never substitute the scoped key on an explicitly different endpoint.
+        key = api_key if api_key is not None else (_env('OMNIROUTE_API_KEY') if root == scoped_root else '')
+        if not key:
+            return None
+        stats = new_diagnostics()
         try:
             http = request.build_opener(request.ProxyHandler({}), _NoRedirect())
-            req = request.Request(root + '/models?kind=chat&prefix=alias', headers={
-                'Authorization': 'Bearer ' + key,
-                'Accept': 'application/json',
-                'User-Agent': 'hermes-omniroute-community/0.3.2-beta.1',
-            })
-            with http.open(req, timeout=timeout) as r:
-                raw = r.read(4 * 1024 * 1024 + 1)
-            if len(raw) > 4 * 1024 * 1024: return None
-            data = json.loads(raw)
-            rows = data.get('data', []) if isinstance(data, dict) else []
-            if not isinstance(rows, list): return None
-            # Only LLM/chat entries belong in the Hermes model picker.
-            # Keep untyped OpenAI-compatible rows, but exclude typed audio,
-            # embeddings, images, video and other specialty models.
-            return list(dict.fromkeys(
-                m['id'] for m in rows
-                if isinstance(m, dict) and isinstance(m.get('id'), str) and
-                m['id'].strip() and not m.get('subtype') and
-                str(m.get('type') or 'chat').lower() in {'chat', 'text', 'language', 'llm', 'combo'}
-            ))
-        except (error.URLError, TimeoutError, ValueError, OSError):
+            rows = _fetch_catalog(root, key, http, timeout, diagnostics=stats)
+            ids = [row['id'] for row in select_rows(rows, 'chat')]
+            log_diagnostics(logging.getLogger(__name__), catalog_diagnostics(rows, 'chat', stats=stats, delivered=len(ids)))
+            return ids
+        except CatalogError as exc:
+            stats.update(status='error', error=str(exc))
+            log_diagnostics(logging.getLogger(__name__), catalog_diagnostics([], 'chat', stats=stats))
             return None
 
 
@@ -106,4 +115,8 @@ omniroute = OmniRouteProfile(
     # must independently support image inputs.
     supports_vision=True,
 )
+# Official Hermes v0.23.2 hook bypasses the generic non-empty base_url gate.
+# Resolve the endpoint and secret at call time, never at plugin import.
+omniroute.base_url_env_var = 'OMNIROUTE_BASE_URL'
+omniroute.picker_catalog = lambda force_refresh: omniroute.fetch_models()
 register_provider(omniroute)

@@ -6,13 +6,14 @@ const path = require('node:path');
 const vm = require('node:vm');
 const source = fs.readFileSync(path.resolve(__dirname, '../backend/desktop/plugin.js'), 'utf8');
 
-function build({ supportsSettingsPage = true, backend = {} } = {}) {
+function build({ supportsSettingsPage = true, supportsModelMenu = true, backend = {} } = {}) {
   const state = [];
   let next = 0;
   let effects = [];
   const calls = [];
   let settingsPage;
-  const fakeSdk = { SETTINGS_PLUGINS_AREA: 'settings.plugins' };
+  const contributions = [];
+  const fakeSdk = { SETTINGS_PLUGINS_AREA: 'settings.plugins', ...(supportsModelMenu ? { MODEL_MENU_ROW_AREA: 'modelMenu.row' } : {}) };
   const mockHooks = {
     useState(initial) {
       const i = next++;
@@ -37,7 +38,7 @@ function build({ supportsSettingsPage = true, backend = {} } = {}) {
       return value instanceof Error ? Promise.reject(value) : Promise.resolve(value);
     },
     registerSettingsPage: supportsSettingsPage ? value => { settingsPage = value; } : undefined,
-    register(value) { settingsPage = value; },
+    register(value) { contributions.push(value); if (value.area === 'settings.plugins') settingsPage = value; },
   };
   plugin.register(ctx);
 
@@ -55,7 +56,7 @@ function build({ supportsSettingsPage = true, backend = {} } = {}) {
     flatten(node.props?.children, out);
     return out;
   }
-  return { plugin, ctx, calls, page: settingsPage, render, effects: () => effects,
+  return { plugin, ctx, calls, contributions, page: settingsPage, render, effects: () => effects,
            flatten, state };
 }
 
@@ -129,6 +130,58 @@ test('no direct network, credential persistence or privileged renderer APIs', ()
   for (const unsafe of ['localStorage', 'sessionStorage', 'ctx.storage', 'window.', 'fetch(', 'eval(', 'new Function(', 'http://n8n', 'innerHTML', 'document.']) {
     assert.equal(source.includes(unsafe), false, 'unexpected: ' + unsafe);
   }
+});
+
+
+test('native model-menu badge identifies OmniRoute routing prefix only', () => {
+  const c = build();
+  const entry = c.contributions.find(x => x.area === 'modelMenu.row');
+  assert.ok(entry);
+  const decorate = entry.data.decorate;
+  for (const [model, expected] of [
+    ['nvidia/nvidia/nemotron', 'nvidia'],
+    ['openrouter/nvidia/nemotron', 'openrouter'],
+    ['groq/groq/compound', 'groq'],
+    ['cf/example/model', 'cf'],
+    ['auto/fast', 'auto'],
+    ['Combo-1', 'Sem prefixo'],
+  ]) {
+    assert.equal(decorate({provider:'omniroute', model, label:'Friendly'}).badge, expected);
+  }
+  assert.equal(decorate({provider:'openrouter', model:'nvidia/nemotron'}), null);
+  assert.equal(decorate({provider:'omniroute', model:''}), null);
+  assert.equal(c.calls.length, 0, 'decorating must not contact a backend');
+});
+
+test('older desktop without the official model-menu hook still registers settings', () => {
+  const c = build({supportsModelMenu:false});
+  assert.equal(c.page.id, 'settings');
+  assert.equal(c.contributions.some(x => x.area === 'modelMenu.row'), false);
+});
+
+test('settings show routing labels but keep the exact model id on selection', async () => {
+  const c = build({backend: {
+    '/status':status,
+    '/models?kind=chat': {models:[
+      {id:'openrouter/nvidia/nemotron', label:'Nemotron', route_label:'openrouter/nvidia/nemotron'},
+      {id:'Combo-1', label:'Combo 1', route_label:'combo/Combo-1'},
+      {id:'groq/legacy', label:'Legacy'},
+    ]},
+    '/model':status,
+  }});
+  c.render(); c.effects()[0](); await tick();
+  const discover = c.flatten(c.render()).find(n => n.type === 'button' && n.props?.children === 'Buscar modelos');
+  discover.props.onClick(); await tick();
+  const nodes = c.flatten(c.render());
+  const opts = nodes.filter(n => n.type === 'option');
+  assert.ok(opts.some(n => n.props.value === 'Combo-1' && n.props.children === 'combo/Combo-1'));
+  assert.ok(opts.some(n => n.props.value === 'openrouter/nvidia/nemotron' && n.props.children === 'openrouter/nvidia/nemotron'));
+  assert.ok(opts.some(n => n.props.value === 'groq/legacy' && n.props.children === 'groq/legacy'));
+  const select = nodes.find(n => n.type === 'select');
+  select.props.onChange({target:{value:'Combo-1'}});
+  const save = c.flatten(c.render()).find(n => n.type === 'button' && n.props?.children === 'Salvar');
+  save.props.onClick(); await tick();
+  assert.equal(c.calls.at(-1).options.body.model, 'Combo-1');
 });
 
 test('discovery multi-select sends explicit filters and does not activate chat', async () => {

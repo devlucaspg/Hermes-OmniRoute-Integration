@@ -1,6 +1,6 @@
 name: omniroute-media
 kind: backend
-version: "0.4.0-beta.1"
+version: "0.4.0-beta.2"
 requires_hermes: ">=0.23.2"
 description: "Self-hosted OmniRoute: image generation/editing, video, web search/extract, TTS and STT"
 author: Community contributors
@@ -15,5 +15,9 @@ optional_env:
     description: OmniRoute API endpoint ending in /v1 or /api/v1
   - name: OMNIROUTE_API_KEY
     description: OmniRoute inference API key
+    secret: true
+    password: true
+  - name: OMNIROUTE_READ_TOKEN
+    description: Optional read-only OmniRoute management access token
     secret: true
     password: true

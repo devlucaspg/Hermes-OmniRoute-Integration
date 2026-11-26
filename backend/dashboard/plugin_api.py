@@ -6,6 +6,8 @@ keep blocking network access out of the gateway asyncio event loop.
 from __future__ import annotations
 
 import json
+import logging
+import http.client
 from urllib import request, error, parse
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -78,6 +80,7 @@ class Connection(BaseModel):
     base_url: str = Field(default='', max_length=1024)
     api_key: str = Field(default='', max_length=8192)
     read_token: str = Field(default='', max_length=8192)
+    clear_read_token: bool = False
 
 
 class ModelSelection(BaseModel):
@@ -100,7 +103,7 @@ def status():
 
 @router.post('/connection')
 def save_connection(body: Connection):
-    if not body.base_url and not body.api_key and not body.read_token:
+    if not body.base_url and not body.api_key and not body.read_token and not body.clear_read_token:
         raise HTTPException(status_code=422, detail='Supply a base URL or a new API key')
     # Validate the entire request BEFORE writing any configuration keys.
     checked = _valid_url(body.base_url) if body.base_url else None
@@ -108,6 +111,10 @@ def save_connection(body: Connection):
         raise HTTPException(status_code=422, detail='API key cannot contain control characters')
     if body.read_token and any(ord(c) < 32 or ord(c) == 127 for c in body.read_token):
         raise HTTPException(status_code=422, detail='Read token cannot contain control characters')
+    if body.read_token and body.clear_read_token:
+        raise HTTPException(status_code=422, detail='Replace or clear the read token, not both')
+    if checked and checked != _value('OMNIROUTE_BASE_URL').rstrip('/') and _secret('OMNIROUTE_READ_TOKEN') and not (body.read_token or body.clear_read_token):
+        raise HTTPException(status_code=422, detail='Replace or clear the read token when changing the endpoint')
     if body.read_token and not (checked or _value('OMNIROUTE_BASE_URL')).startswith('https://'):
         raise HTTPException(status_code=422, detail='Management token requires HTTPS')
     if checked:
@@ -116,11 +123,11 @@ def save_connection(body: Connection):
             set_config_value('model.base_url', checked)
     if body.api_key:
         save_env_value_secure('OMNIROUTE_API_KEY', body.api_key)
-    if body.read_token:
+    if body.read_token or body.clear_read_token:
         save_env_value_secure('OMNIROUTE_READ_TOKEN', body.read_token)
     result = status()
-    if body.read_token:
-        result['read_token_configured'] = True
+    if body.read_token or body.clear_read_token:
+        result['read_token_configured'] = bool(body.read_token)
     # The current request may have an immutable secret snapshot loaded before
     # the save. Report the new key as configured without exposing its value.
     if body.api_key:
@@ -179,28 +186,25 @@ class _NoRedirect(request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl): return None
 
 
-def _matches_kind(row: dict, kind: str) -> bool:
-    """Mirror the OmniRoute 3.8.53 model taxonomy without guessing audio roles."""
-    if not isinstance(row.get('id'), str) or not row['id'].strip():
-        return False
-    category = str(row.get('type') or 'chat').strip().lower()
-    subtype = str(row.get('subtype') or '').strip().lower()
-    if kind == 'chat':
-        return category in {'chat', 'text', 'language', 'llm', 'combo'} and not subtype
-    if kind == 'image':
-        vals = row.get('input_modalities')
-        return not isinstance(vals, list) or not vals or 'text' in vals
-    if kind == 'video':
-        return category == 'video'
-    if category == 'audio' and subtype:
-        return subtype in ({'speech', 'tts'} if kind == 'tts' else {'transcription', 'stt'})
-    targets = {'tts': {'tts', 'speech', 'audio-speech'},
-               'stt': {'stt', 'transcription', 'audio-transcriptions'}}
-    values = [row.get('type'), row.get('modality'), row.get('category')]
-    for field in ('supportedEndpoints', 'supported_endpoints', 'endpoints'):
-        if isinstance(row.get(field), list):
-            values.extend(row[field])
-    return bool({str(v).lower() for v in values if v} & targets.get(kind, set()))
+# The Hermes loader may import this entrypoint without a package context.
+# Load the sibling catalog module by absolute file path; do not change sys.path.
+from importlib.util import spec_from_file_location, module_from_spec
+from pathlib import Path
+
+_catalog_spec = spec_from_file_location(__name__ + '_catalog_discovery',
+                                        Path(__file__).resolve().parents[1] / 'catalog_discovery.py')
+_catalog_module = module_from_spec(_catalog_spec)
+_catalog_spec.loader.exec_module(_catalog_module)
+CatalogError = _catalog_module.CatalogError
+_fetch_catalog = _catalog_module._fetch_catalog
+_is_chat = _catalog_module._is_chat
+select_rows = _catalog_module.select_rows
+catalog_diagnostics = _catalog_module.catalog_diagnostics
+new_diagnostics = _catalog_module.new_diagnostics
+log_diagnostics = _catalog_module.log_diagnostics
+
+def _matches_kind(row, kind):
+    return _catalog_module._matches_kind(row, kind)
 
 
 @router.get('/models')
@@ -210,26 +214,34 @@ def models(kind: str = 'chat'):
     key = _secret('OMNIROUTE_API_KEY')
     if not base or not key: raise HTTPException(status_code=409, detail='Configure OmniRoute first')
     path = ('/images/generations' if kind == 'image' else
-            '/videos/generations' if kind == 'video' else
-            '/models?kind=chat&prefix=alias' if kind == 'chat' else '/models')
-    url = _valid_url(base) + path
+            '/videos/generations' if kind == 'video' else '/models')
+    root = _valid_url(base)
     opener = request.build_opener(request.ProxyHandler({}), _NoRedirect())
-    req = request.Request(url, headers={'Authorization': 'Bearer ' + key, 'Accept': 'application/json',
-                                        'User-Agent': 'hermes-omniroute-community/0.3.2-beta.1'})
+    stats = new_diagnostics()
     try:
-        with opener.open(req, timeout=12) as response:
-            raw = response.read(4 * 1024 * 1024 + 1)
-        if len(raw) > 4 * 1024 * 1024: raise ValueError('Model catalog too large')
-        body = json.loads(raw)
-    except (error.URLError, ValueError, OSError):
-        raise HTTPException(status_code=502, detail='Unable to retrieve the OmniRoute model catalog') from None
-    rows = body.get('data') if isinstance(body, dict) else None
-    if not isinstance(rows, list): rows = []
+        rows = _fetch_catalog(root, key, opener, path=path, diagnostics=stats)
+    except CatalogError as exc:
+        stats.update(status='error', error=str(exc))
+        details = catalog_diagnostics([], kind, path, stats=stats)
+        log_diagnostics(logging.getLogger(__name__), details)
+        raise HTTPException(status_code=502, detail=str(exc)) from None
+    selected = select_rows(rows, kind, path)
+    # Keep the exact inference ID; the route label is display-only. The
+    # first segment of a namespaced ID is the OmniRoute routing alias, not
+    # necessarily the upstream manufacturer's name.
     result = []
-    for row in rows:
-        if _matches_kind(row, kind):
-            result.append({'id': row['id'], 'label': str(row.get('name') or row['id'])})
-    return {'models': result[:1000], 'kind': kind}
+    for row in selected:
+        model_id = row['id']
+        owner = row.get('owned_by') if isinstance(row.get('owned_by'), str) else ''
+        source_root = row.get('root') if isinstance(row.get('root'), str) else ''
+        if not owner and row.get('type') == 'combo':
+            owner = 'combo'
+        route_label = model_id if '/' in model_id or not owner else owner + '/' + model_id
+        result.append({'id': model_id, 'label': str(row.get('name') or model_id),
+                       'route_label': route_label, 'owned_by': owner, 'root': source_root})
+    details = catalog_diagnostics(rows, kind, path, stats=stats, delivered=len(result))
+    log_diagnostics(logging.getLogger(__name__), details)
+    return {'models': result, 'kind': kind, 'diagnostics': details}
 
 
 # Read-only general discovery. The existing category-specific picker remains
@@ -258,7 +270,8 @@ def _discovery_query(filters: DiscoveryFilters) -> str:
     params = {'prefix': 'canonical'}
     if filters.configured_only:
         params['configuredOnly'] = 'true'
-    if len(set(filters.kinds)) == 1:
+    # Keep typed combos and legacy chat aliases visible as in the stable picker.
+    if len(set(filters.kinds)) == 1 and filters.kinds[0] != 'chat':
         params['kind'] = filters.kinds[0]
     if filters.capabilities and (filters.match == 'and' or len(set(filters.capabilities)) == 1):
         params['capability'] = ','.join(dict.fromkeys(filters.capabilities))
@@ -284,7 +297,7 @@ def _discovery_get(url: str, credential: str) -> dict:
         if not isinstance(body, dict) or body.get('error'):
             raise ValueError('Unexpected response')
         return body
-    except (error.URLError, ValueError, OSError):
+    except (error.URLError, ValueError, OSError, http.client.HTTPException):
         raise HTTPException(status_code=502, detail='OmniRoute discovery request failed') from None
 
 
@@ -299,6 +312,8 @@ def _free_index(rows: list) -> dict:
             continue
         provider, model = row.get('provider'), row.get('modelId')
         if not isinstance(provider, str) or not isinstance(model, str):
+            continue
+        if row.get('enabled') is False:
             continue
         if row.get('freeType') not in {'recurring-daily', 'recurring-monthly',
                 'recurring-uncapped', 'recurring-credit', 'one-time-initial', 'keyless'}:
@@ -319,10 +334,11 @@ def _filtered_rows(rows: list, filters: DiscoveryFilters, free: dict, rankings: 
             continue
         if not isinstance(owner, str):
             continue
-        kind = row.get('type') or 'chat'
+        kind = 'chat' if _is_chat(row) else row.get('type')
         if not isinstance(kind, str) or kind not in kinds:
             continue
-        if not filters.include_combos and owner == 'combo':
+        is_combo = _catalog_module._is_combo(row)
+        if not filters.include_combos and is_combo:
             continue
         flags = row.get('capabilities')
         flags = flags if isinstance(flags, dict) else {}
@@ -335,16 +351,19 @@ def _filtered_rows(rows: list, filters: DiscoveryFilters, free: dict, rankings: 
         root = row.get('root')
         # No suffix stripping or name matching: variants and aliases may have
         # distinct prices. Combos are not proven free by their names or ranking.
-        budget = free.get((owner, root)) if isinstance(root, str) and owner != 'combo' else None
+        budget = free.get((owner, root)) if isinstance(root, str) and not is_combo else None
         if filters.free_only and not budget:
             continue
         rank = rankings.get(owner, {})
-        result[identifier] = {'id': identifier, 'label': str(row.get('display_name') or row.get('name') or identifier)[:256],
+        if any(ord(c) < 32 or ord(c) == 127 for c in identifier):
+            continue
+        result.setdefault(identifier, {'id': identifier, 'label': str(row.get('display_name') or row.get('name') or identifier)[:256],
                               'kind': kind, 'provider': owner, 'context_length': context,
                               'capabilities': [cap for cap in DISCOVERY_CAPS if flags.get(cap) is True],
                               'free_type': budget.get('freeType') if budget else None,
                               'free_metadata': {f: budget.get(f) for f in ('monthlyTokens', 'creditTokens', 'poolKey', 'tos', 'hardStopGuaranteed', 'trainsOnPrompts', 'eligibilityGate')} if budget else None,
-                              'provider_state': rank.get('state')}
+                              'provider_state': rank.get('state'), 'provider_usage': rank.get('usage'),
+                              'route_label': identifier if '/' in identifier or not owner else owner + '/' + identifier})
     return list(result.values())
 
 
@@ -358,10 +377,14 @@ def discover_models(filters: DiscoveryFilters):
     if not base or not key:
         raise HTTPException(status_code=409, detail='Configure OmniRoute first')
     base = _valid_url(base)
-    body = _discovery_get(base + path, key)
-    rows = body.get('data')
-    if not isinstance(rows, list) or body.get('has_more') is True:
-        raise HTTPException(status_code=502, detail='Incomplete OmniRoute catalog')
+    params = dict(parse.parse_qsl(parse.urlsplit(path).query))
+    stats = new_diagnostics()
+    try:
+        opener = request.build_opener(request.ProxyHandler({}), _NoRedirect())
+        rows = _fetch_catalog(base, key, opener, diagnostics=stats, query_params=params)
+    except CatalogError as exc:
+        log_diagnostics(logging.getLogger(__name__), stats)
+        raise HTTPException(status_code=502, detail=str(exc)) from None
     warnings = []
     free = {}
     rankings = {}
@@ -387,24 +410,35 @@ def discover_models(filters: DiscoveryFilters):
                 items = _discovery_get(root + '/free-provider-rankings?configuredOnly=true&availableOnly=true&withUsage=true&sortBy=reliability&limit=100', token).get('rankings')
                 if not isinstance(items, list):
                     raise ValueError('Invalid rankings')
-                rankings = {r['id']: {'state': r['reliability'].get('state')}
-                            for r in items if isinstance(r, dict) and isinstance(r.get('id'), str)
-                            and isinstance(r.get('reliability'), dict)}
+                for r in items:
+                    if not isinstance(r, dict) or not isinstance(r.get('id'), str):
+                        continue
+                    rel = r.get('reliability')
+                    if not isinstance(rel, dict):
+                        continue
+                    usage = rel.get('usage')
+                    rankings[r['id']] = {'state': rel.get('state'),
+                        'usage': {k: usage.get(k) for k in ('requests', 'successes', 'successRate', 'avgLatencyMs', 'windowHours')}
+                        if isinstance(usage, dict) else None}
             except (HTTPException, ValueError):
                 warnings.append('Provider rankings unavailable')
             try:
                 data = _discovery_get(root + '/free-tier/summary', token)
                 summary = {k: data.get(k) for k in ('modelCount', 'poolCount', 'steadyRecurringTokens',
-                                                     'catalogUpdatedAt', 'catalogSource')}
+                                                     'firstMonthRealisticTokens', 'catalogUpdatedAt', 'catalogSource')}
                 # Summary is a global catalog estimate, never an account balance.
                 budgets = data.get('perModel')
                 if isinstance(budgets, list) and free:
                     detailed = _free_index(budgets)
                     # Only enrich existing exact matches, never promote an
                     # unknown row based on global or provider-level totals.
+                    # The active overlay can retire baseline entries. Do not revive
+                    # an offer missing/disabled in the effective overlay.
                     free = {k: dict(v, **{f: detailed[k][f] for f in
-                             ('hardStopGuaranteed', 'trainsOnPrompts', 'eligibilityGate')
-                             if f in detailed[k]}) if k in detailed else v for k, v in free.items()}
+                             ('freeType', 'monthlyTokens', 'creditTokens', 'poolKey', 'tos',
+                              'hardStopGuaranteed', 'trainsOnPrompts', 'eligibilityGate')
+                             if f in detailed[k]}) if k in detailed else v for k, v in free.items()
+                            if k in detailed or data.get('catalogSource') != 'radar-overlay'}
             except HTTPException:
                 warnings.append('Free tier summary unavailable')
     elif filters.free_only:
@@ -412,4 +446,7 @@ def discover_models(filters: DiscoveryFilters):
     if filters.free_only:
         warnings.append('Cataloged free offers only; account eligibility and zero cost are not guaranteed. Unverified combos excluded.')
     models = _filtered_rows(rows, filters, free, rankings)
-    return {'models': models, 'count': len(models), 'warnings': warnings, 'free_summary': summary}
+    stats['delivered'] = len(models)
+    log_diagnostics(logging.getLogger(__name__), stats)
+    return {'models': models, 'count': len(models), 'warnings': warnings, 'free_summary': summary,
+            'diagnostics': stats}

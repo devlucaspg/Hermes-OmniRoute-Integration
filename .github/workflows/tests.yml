@@ -12,14 +12,29 @@ jobs:
       matrix:
         python-version: ['3.11','3.12','3.13','3.14']
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v7.1.0
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install unit-test dependencies
         run: python -m pip install "fastapi>=0.115,<1" "httpx>=0.27,<1" "PyYAML>=6,<7"
+      - run: python scripts/sync_catalog.py --check
+      - run: python scripts/release_checksums.py --check
       - run: python -m unittest discover -s tests -v
       - run: python -m compileall -q backend model-provider
+
+  javascript:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: ['24','26']
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: ${{ matrix.node-version }}
+      - run: node --version
       - run: node --check backend/dashboard/dist/index.js
       - run: node --check backend/desktop/plugin.js
       - run: node --test tests/test_desktop.cjs
@@ -27,7 +42,7 @@ jobs:
   hermes-validator:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
       - name: Validate backend using the official Hermes validator
         uses: NousResearch/hermes-agent/.github/actions/plugin-validate@v0.23.2
         with:

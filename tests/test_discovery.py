@@ -61,7 +61,7 @@ class Discovery(unittest.TestCase):
         self.assertEqual(len(self.ids(capabilities=['tool_calling','vision'],match='or')),4)
     def test_native_query(self):
         params=parse_qs(urlsplit(api._discovery_query(api.DiscoveryFilters(kinds=['chat'],capabilities=['vision','tool_calling']))).query)
-        self.assertEqual(params['kind'],['chat'])
+        self.assertNotIn('kind',params)  # retain explicit typed combos
         self.assertEqual(params['capability'],['vision,tool_calling'])
         self.assertEqual(params['prefix'],['canonical'])
         self.assertEqual(params['configuredOnly'],['true'])
@@ -84,6 +84,51 @@ class Discovery(unittest.TestCase):
             self.assertEqual(api.discover_models(api.DiscoveryFilters(kinds=[]))['count'],0)
             get.assert_not_called()
     def test_free_catalog_failure_is_closed(self):
-        with patch.object(api,'_value',return_value='https://router.example/v1'), patch.object(api,'_secret',return_value='synthetic'), patch.object(api,'_discovery_get',side_effect=[{'data':rows},HTTPException(502)]):
+        with patch.object(api,'_value',return_value='https://router.example/v1'), patch.object(api,'_secret',return_value='synthetic'), patch.object(api,'_fetch_catalog',return_value=rows), patch.object(api,'_discovery_get',side_effect=HTTPException(502)):
             with self.assertRaises(HTTPException):
                 api.discover_models(api.DiscoveryFilters(free_only=True))
+
+    def test_native_pagination_and_filters_over_1000(self):
+        from io import BytesIO
+        import json
+        source = [{'id':f'p/model {i}+&', 'owned_by':'p', 'root':f'model {i}+&',
+                   'capabilities':{'tool_calling':True}} for i in range(1705)]
+        seen = []
+        class Opener:
+            def open(self, req, timeout):
+                params = parse_qs(urlsplit(req.full_url).query)
+                seen.append(params)
+                assert params['prefix'] == ['canonical']
+                assert params['configuredOnly'] == ['true']
+                assert params['capability'] == ['tool_calling']
+                start = 0 if 'after' not in params else next(i+1 for i,r in enumerate(source) if r['id']==params['after'][0])
+                page = source[start:start+int(params['limit'][0])]
+                return BytesIO(json.dumps({'data':page,'has_more':start+len(page)<len(source),'last_id':page[-1]['id']}).encode())
+        with patch.object(api,'_value',return_value='https://router.example/v1'), patch.object(api,'_secret',side_effect=lambda n:'synthetic' if n=='OMNIROUTE_API_KEY' else ''), patch.object(api.request,'build_opener',return_value=Opener()):
+            result=api.discover_models(api.DiscoveryFilters(capabilities=['tool_calling']))
+        self.assertEqual(result['count'],1705)
+        self.assertEqual(result['diagnostics']['pages'],9)
+        self.assertEqual(result['models'][-1]['id'],source[-1]['id'])
+        self.assertEqual(seen[1]['after'],[source[199]['id']])
+    def test_read_token_and_overlay_retirement(self):
+        budget={'provider':'p','modelId':'org/a','freeType':'recurring-daily','monthlyTokens':5}
+        def get(url, key):
+            self.assertEqual(key,'read-token')
+            if url.endswith('/free-models'): return {'models':[budget]}
+            if '/free-provider-rankings?' in url: return {'rankings':[{'id':'p','reliability':{'state':'healthy','usage':{'requests':10,'successes':9,'avgLatencyMs':123,'windowHours':24}}}]}
+            return {'catalogSource':'radar-overlay','modelCount':1,'perModel':[dict(budget,enabled=False)]}
+        with patch.object(api,'_value',return_value='https://router.example/v1'), patch.object(api,'_secret',side_effect=lambda n:'read-token' if n=='OMNIROUTE_READ_TOKEN' else 'inference-key'), patch.object(api,'_fetch_catalog',return_value=rows) as infer, patch.object(api,'_discovery_get',side_effect=get):
+            result=api.discover_models(api.DiscoveryFilters(free_only=True))
+            self.assertEqual(result['count'],0)
+            self.assertEqual(infer.call_args.args[1],'inference-key')
+            self.assertEqual(result['free_summary']['catalogSource'],'radar-overlay')
+    def test_typed_combo_and_chat_subtypes(self):
+        source=[{'id':'c','owned_by':'combo','type':'combo'},
+                {'id':'r','owned_by':'p','type':'chat','subtype':'reasoning'},
+                {'id':'s','owned_by':'p','type':'chat','subtype':'speech'}]
+        self.assertEqual([r['id'] for r in api._filtered_rows(source,api.DiscoveryFilters(kinds=['chat']),{}, {})],['c','r'])
+    def test_read_token_endpoint_change_requires_explicit_action(self):
+        with patch.object(api,'_value',return_value='https://router.example/v1'), patch.object(api,'_secret',return_value='synthetic'), patch.object(api,'save_env_value') as save:
+            with self.assertRaises(HTTPException):
+                api.save_connection(api.Connection(base_url='https://other.example/v1'))
+            save.assert_not_called()

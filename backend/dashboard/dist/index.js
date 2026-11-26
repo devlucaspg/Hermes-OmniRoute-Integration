@@ -24,6 +24,7 @@ const initialDiscovery = () => ({kinds: DISCOVERY_TYPES.map(x=>x[0]), capabiliti
     var [discovery,setDiscovery]=React.useState(null);
     var [page,setPage]=React.useState(0);
     var [readToken,setReadToken]=React.useState('');
+    var [clearReadToken,setClearReadToken]=React.useState(false);
     var status = React.useState(null), state = status[0], setState = status[1];
     var url = React.useState(''), currentUrl = url[0], setUrl = url[1];
     var secret = React.useState(''), key = secret[0], setKey = secret[1];
@@ -35,20 +36,28 @@ const initialDiscovery = () => ({kinds: DISCOVERY_TYPES.map(x=>x[0]), capabiliti
     function refresh() {
       SDK.fetchJSON(base + '/status').then(function (s) {
         setState(s); setUrl(s.base_url || ''); setSelections(s.models || {}); setPreferences(s.preferences || {});
-      }).catch(function(e){setFeedback(String(e.message || e));});
+      }).catch(function(e){setFeedback('Operação OmniRoute falhou. Confira a conexão e as permissões.');});
     }
     React.useEffect(refresh, []);
     function send(path, data, ok) {
       setLoading(true); setFeedback('');
       SDK.fetchJSON(base + path, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)})
-        .then(function(s){setState(s); setKey(''); setReadToken(''); setDiscovery(null); setPage(0); setFeedback(ok + ' (a Hermes reload may be needed).');})
-        .catch(function(e){setFeedback(String(e.message || e));})
-        .finally(function(){setKey('');setReadToken('');setLoading(false);});
+        .then(function(s){setState(s); setKey(''); setReadToken('');setClearReadToken(false); setDiscovery(null); setPage(0); setFeedback(ok + ' (a Hermes reload may be needed).');})
+        .catch(function(e){setFeedback('Operação OmniRoute falhou. Confira a conexão e as permissões.');})
+        .finally(function(){setKey('');setReadToken('');setClearReadToken(false);setLoading(false);});
     }
     function showModels(kind) {
       SDK.fetchJSON(base + '/models?kind=' + encodeURIComponent(kind))
-        .then(function(body){setCatalogs(function(prev){return Object.assign({},prev,{[kind]:body.models || []});});})
-        .catch(function(e){setFeedback(String(e.message || e));});
+        .then(function(body){
+          setCatalogs(function(prev){return Object.assign({},prev,{[kind]:body.models || []});});
+          var d = body.diagnostics, c = d && d.classified;
+          if (d && c) setFeedback('Catalog ' + kind + ': ' + d.received + ' received; chat ' + c.chat +
+            ', image ' + c.image + ', video ' + c.video + ', TTS ' + c.tts + ', STT ' + c.stt +
+            ', combos ' + d.combos + ', other ' + d.other + '; duplicates removed ' + d.duplicates_removed +
+            '; delivered ' + d.delivered + '; ' + d.pages + ' pages / ' + d.requests + ' requests; ' +
+            d.duration_ms + ' ms; source ' + d.source + '.');
+        })
+        .catch(function(e){setFeedback('Operação OmniRoute falhou. Confira a conexão e as permissões.');});
     }
     function updateFilter(name,value){setFilters(old=>({...old,[name]:value}));setDiscovery(null);setPage(0);}
     function toggleFilter(name,value,checked){updateFilter(name,checked?[...new Set([...filters[name],value])]:filters[name].filter(x=>x!==value));}
@@ -68,8 +77,9 @@ const initialDiscovery = () => ({kinds: DISCOVERY_TYPES.map(x=>x[0]), capabiliti
           h('p', {className:'text-sm mb-3'}, 'Private endpoint; credentials are saved by Hermes and never returned to this page.'),
           Field('API base URL (/v1 or /api/v1)', h(C.Input, {value:currentUrl, onChange:function(e){setUrl(e.target.value)}, placeholder:'https://your-router.example/v1'})),
           Field('Replace API key (leave empty to keep existing)', h(C.Input, {type:'password', autoComplete:'new-password', value:key, onChange:function(e){setKey(e.target.value);}, placeholder:'Key configured: ' + (state && state.api_key_configured ? 'yes':'no')})),
-          Field('Token de leitura (opcional)',h(C.Input,{type:'password',value:readToken,autoComplete:'new-password',onChange:e=>setReadToken(e.target.value),placeholder:state?.read_token_configured?'Configurado':'Não configurado'})),
-          h(C.Button, {disabled:loading, onClick:function(){send('/connection',{base_url:currentUrl, api_key:key,read_token:readToken}, 'Connection saved');}}, 'Save connection'),
+          Field('Token de leitura (opcional)',h(C.Input,{type:'password',value:readToken,disabled:clearReadToken,autoComplete:'new-password',onChange:e=>setReadToken(e.target.value),placeholder:state?.read_token_configured?'Configurado':'Não configurado'})),
+          check('Remover token de leitura',clearReadToken,v=>{setReadToken('');setClearReadToken(v);}),
+          h(C.Button, {disabled:loading, onClick:function(){send('/connection',{base_url:currentUrl, api_key:key,read_token:readToken,clear_read_token:clearReadToken}, 'Connection saved');}}, 'Save connection'),
           h('p', {className:'text-xs mt-2'}, 'All settings are managed by Hermes for the selected profile. The chat provider changes only when you activate it explicitly.')
         )
       ),
@@ -93,7 +103,7 @@ const initialDiscovery = () => ({kinds: DISCOVERY_TYPES.map(x=>x[0]), capabiliti
           discovery&&h('div',null,h('p',null,discovery.models.length+' modelo(s) encontrados'),
             (discovery.warnings||[]).map((w,i)=>h('p',{key:i,className:'text-xs'},String(w))),
             discovery.free_summary&&h('p',{className:'text-xs'},'Catálogo global: '+String(discovery.free_summary.modelCount??'—')+' ofertas; não é saldo da conta.'),
-            discovery.models.slice(page*50,page*50+50).map(m=>h('div',{key:m.id,className:'border-b py-2'},h('div',null,m.label),h('div',{className:'text-xs break-all'},m.id+' · '+m.kind+(m.free_type?' · '+m.free_type:'')+(m.provider_state?' · '+m.provider_state:'')),['chat','image','video'].includes(m.kind)&&h(C.Button,{disabled:loading,onClick:()=>setSelections(old=>({...old,[m.kind]:m.id}))},'Usar no campo '+m.kind+' (salvar abaixo)'))),
+            discovery.models.slice(page*50,page*50+50).map(m=>h('div',{key:m.id,className:'border-b py-2'},h('div',null,m.label),h('div',{className:'text-xs break-all'},(m.route_label||m.id)+' · '+m.kind+(m.free_type?' · '+m.free_type:'')+(m.provider_state?' · '+m.provider_state:'')),m.provider_usage&&h('div',{className:'text-xs'},'Provedor: '+String(m.provider_usage.successes??'—')+'/'+String(m.provider_usage.requests??'—')+' sucessos · '+String(m.provider_usage.avgLatencyMs??'—')+' ms · '+String(m.provider_usage.windowHours??'—')+' h'),['chat','image','video'].includes(m.kind)&&h(C.Button,{disabled:loading,onClick:()=>setSelections(old=>({...old,[m.kind]:m.id}))},'Usar no campo '+m.kind+' (salvar abaixo)'))),
             h(C.Button,{disabled:page===0||loading,onClick:()=>setPage(p=>p-1)},'Anterior'),
             h(C.Button,{disabled:(page+1)*50>=discovery.models.length||loading,onClick:()=>setPage(p=>p+1)},'Próxima'))
         )
@@ -109,7 +119,7 @@ const initialDiscovery = () => ({kinds: DISCOVERY_TYPES.map(x=>x[0]), capabiliti
           ),
           catalogs[kind] && h('select',{className:'w-full p-2 rounded border',value:'',onChange:function(e){var v=e.target.value;setSelections(function(s){return Object.assign({},s,{[kind]:v});});}},
             h('option', {value:''}, 'Select a discovered model (' + catalogs[kind].length + ')'),
-            catalogs[kind].map(function(m){return h('option', {value:m.id,key:m.id}, m.label);})
+            catalogs[kind].map(function(m){return h('option', {value:m.id,key:m.id}, m.route_label || m.id);})
           )
         );}) )
       ),

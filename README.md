@@ -2,7 +2,7 @@
 
 [Leia em Português (Brasil)](README.pt-BR.md)
 
-**Release candidate:** `0.4.0-beta.1` (not yet submitted or accepted by the official Hermes Marketplace).
+**Release candidate:** `0.4.0-beta.2` (not yet submitted or accepted by the official Hermes Marketplace).
 
 An original, self-hosted integration connecting the [Hermes Agent](https://github.com/NousResearch/hermes-agent) to any configured [OmniRoute](https://github.com/cheaper-inference/OmniRoute) OpenAI-compatible routing instance.
 
@@ -13,7 +13,7 @@ An original, self-hosted integration connecting the [Hermes Agent](https://githu
 | Surface | Component | Endpoint | Notes |
 | --- | --- | --- | --- |
 | LLM chat, tool calling, streaming and vision-capable models | `model-provider/` | `POST /chat/completions` | Native Hermes transport, uses Hermes `model.provider=omniroute`; not a custom chat transport |
-| Live LLM model discovery | `model-provider/` | `GET /models?kind=chat&prefix=alias` | Excludes typed media/embeddings; no hardcoded fallback IDs |
+| Live LLM model discovery | `model-provider/` | `GET /models?prefix=alias&limit=200` | Excludes typed media/embeddings; no hardcoded fallback IDs |
 | Image generation | `backend/` | `POST /images/generations` | Send size only if advertised in pixels (never inject a default); permits models requiring no size |
 | Image editing and references | `backend/` | `POST /images/edits` | Model-specific limits: usually 1, Firefly up to 4, Codex 8 or 16; Hermes safe URL downloads |
 | Video generation | `backend/` | `GET/POST /videos/generations` | Live specialty catalog and per-model metadata; no fixed 10-second dispatch limit; xAI image field corrected |
@@ -59,7 +59,7 @@ These are **two separate installs**, not a single combined Marketplace entry. Th
 
 ### Install with the developer script (alternative)
 
-Clone the current default branch (v0.4.0-beta.1) on the Hermes machine and invoke the installer:
+Clone the current default branch (v0.4.0-beta.2) on the Hermes machine and invoke the installer:
 
 ```bash
 git clone https://github.com/devlucaspg/Hermes-OmniRoute-Integration.git
@@ -103,7 +103,7 @@ stt:
 Optional environment variables, all editable in the Hermes dashboard: `OMNIROUTE_IMAGE_MODEL`, `OMNIROUTE_VIDEO_MODEL`, `OMNIROUTE_TTS_MODEL`, `OMNIROUTE_STT_MODEL`, `OMNIROUTE_TTS_VOICE`, `OMNIROUTE_SEARCH_PROVIDER`, `OMNIROUTE_FETCH_PROVIDER`, `OMNIROUTE_CHAT_MODEL` (dashboard preset only unless native provider active). No default model IDs are fabricated.
 
 
-## Hermes Desktop settings (new in 0.4.0-beta.1)
+## Hermes Desktop settings (introduced in 0.4.0-beta.1)
 
 The release now includes `backend/desktop/plugin.js`, a **native Desktop Settings → Plugins page** for `omniroute-media`. It uses the existing profile-scoped `backend/dashboard/plugin_api.py` through the official `ctx.rest` SDK; **no second credential store**, no direct OmniRoute HTTP calls from the desktop app, and no change to the working chat/media providers. It provides connection configuration, masked API key replacement, live discovery and saving of chat/image/video/TTS/STT models, TTS voice, search/extract overrides and explicit chat activation.
 
@@ -113,9 +113,10 @@ Full directions, safety boundaries, prerequisites, diagnostics and rollback: [do
 
 ## Compatibility with OmniRoute 3.8.53
 
-The v0.4.0-beta.1 adapter is aligned against **OmniRoute tag v3.8.53**. In particular:
+The v0.4.0-beta.2 adapter is aligned against **OmniRoute tag v3.8.53**. In particular:
 
-- Chat models are discovered with `GET /v1/models?kind=chat&prefix=alias`, then filtered defensively; image/video/audio/embedding entries do not appear in the LLM picker.
+- Chat models are discovered from the complete API-key-authorized unified catalog using `GET /v1/models?prefix=alias&limit=200` and subsequent `after` cursors. Local classification preserves valid chat subtypes and combos and excludes specialized models. The dashboard no longer truncates at 1,000 entries. The client reduces the page size on oversized responses and fails explicitly on incomplete pagination; per-page and aggregate safety budgets remain. The native provider registers Hermes's `picker_catalog` hook and its base URL environment variable without storing profile credentials globally.
+- Hermes Desktop initially displays 50 model families per provider; search and model visibility settings are Hermes-owned and are not changed by this plugin. Use the Hermes **Refresh models** action after a catalog change. The plugin's media catalog cache uses a 60-second successful-result TTL, isolated by endpoint and key fingerprint; failed results are not cached.
 - Audio models use `type: audio` together with `subtype: speech` (TTS) or `subtype: transcription` (STT). This is shared with the dashboard selector.
 - Image generation omits `size` when no pixel dimensions are advertised for that model, since some models reject any explicit size. An explicit caller-provided pixel `size` remains possible.
 - Image editing uses JSON `images` with base64 data URLs, and enforces known provider-specific reference limits before forwarding. OmniRoute makes the final decision for combos and provider capabilities.
@@ -160,3 +161,15 @@ See [official submission rules](https://github.com/NousResearch/hermes-agent/blo
 ## License and credit
 
 MIT license. Original code created from public API contracts and official Hermes plugin extension points. 
+
+### Catalog maintenance and diagnostics
+
+`backend/catalog_discovery.py` is the sole maintained source of catalog pagination, classification, deduplication and telemetry. The independent `model-provider/` package contains a generated, byte-identical copy, because Hermes installs each subdirectory separately. Do not edit the generated copy; run `python scripts/sync_catalog.py` and commit the result. CI verifies the copy.
+
+The plugin's `GET /models?kind=chat` dashboard API includes an additive `diagnostics` object, and the Desktop/Dashboard Discover action displays the metrics. Native chat and backend media also emit structured INFO logs (WARNING on discovery failure). Fields: `source` (api/cache), `status`, `received`, `classified` by modality, `combos`, `other`, `duplicates_removed`, `delivered`, `pages`, `requests`, `duration_ms`, and sanitized `error`. Counts describe the queried endpoint, not the entire OmniRoute deployment; classifications can overlap, and a combo can also count as chat. Duplicate counts apply to the selected modality. Delivered means IDs emitted by the plugin, not the number Hermes chooses to display. Cache hits show zero network pages/requests; native Hermes's separate cache remains manually refreshable. No keys, base URLs, model IDs or raw upstream messages are logged in these metrics.
+
+Before committing release changes, stage all new source files and run `python scripts/release_checksums.py` in an LF checkout. Verify with `python scripts/release_checksums.py --check`. The SHA-256 manifest covers every tracked file except itself; CI checks it.
+
+### Route identity in model pickers
+
+On Desktop versions exporting `MODEL_MENU_ROW_AREA`, the plugin adds the OmniRoute routing prefix as a badge to native picker rows, leaving inference IDs and other providers unchanged. Bare IDs are marked `Sem prefixo` rather than guessing their owner. The plugin settings pickers use `route_label` (the full routing ID, or a display-only owner prefix for bare IDs); `/models` also returns `owned_by` and `root` when available. No network call is made by the native row decorator.

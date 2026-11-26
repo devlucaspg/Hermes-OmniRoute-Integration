@@ -207,7 +207,7 @@ class ExtendedSafetyTests(unittest.TestCase):
             self.assertEqual(CORE.model_id('explicit/model', 'OMNIROUTE_IMAGE_MODEL', 'image'), 'explicit/model')
 
     def test_discovery_from_mocked_api(self):
-        with patch.object(CORE, 'call_json', return_value={'data':[{'id':'demo/a','type':'chat'}, {'id':'demo/b','type':'chat'}]}) as req:
+        with patch.object(CORE, '_fetch_catalog', return_value=[{'id':'demo/a','type':'chat'}, {'id':'demo/b','type':'chat'}]) as req:
             fresh = CORE.Catalog()
             with patch.dict(os.environ, {'OMNIROUTE_API_KEY':'key','OMNIROUTE_BASE_URL':'https://router.test/v1'}):
                 one = fresh.get('/models'); two = fresh.get('/models')
@@ -267,8 +267,44 @@ class ExtendedSafetyTests(unittest.TestCase):
                 self.assertEqual([x['id'] for x in m.models('chat')['models']], ['demo/chat'])
                 self.assertEqual([x['id'] for x in m.models('tts')['models']], ['demo/speech'])
                 self.assertEqual([x['id'] for x in m.models('stt')['models']], ['demo/transcription'])
-            self.assertTrue(called[0].endswith('/models?kind=chat&prefix=alias'))
-            self.assertTrue(called[1].endswith('/models'))
+            self.assertTrue(called[0].endswith('/models?prefix=alias&limit=200'))
+            self.assertTrue(called[1].endswith('/models?prefix=alias&limit=200'))
+            large = [{'id': f'model/{i}', 'type': 'chat'} for i in range(1205)]
+            large += [{'id':'model/reason', 'type':'chat','subtype':'reasoning'},
+                      {'id':'combo/default', 'type':'combo'},
+                      {'id':'model/0', 'type':'chat'},
+                      {'id':'media/tts', 'type':'audio','subtype':'speech'}]
+            with patch.object(m, '_fetch_catalog', return_value=large):
+                response = m.models('chat')
+                listed = response['models']
+            self.assertEqual(len(listed), 1207)
+            combo = next(x for x in listed if x['id'] == 'combo/default')
+            self.assertEqual(combo['route_label'], 'combo/default')
+            with patch.object(m, '_fetch_catalog', return_value=[
+                    {'id':'openrouter/nvidia/nemotron','owned_by':'openrouter',
+                     'root':'nvidia/nemotron','name':'Nemotron'},
+                    {'id':'Combo-1','owned_by':'combo','root':'Combo-1'},
+                    {'id':'custom-bare'}]):
+                labels = m.models('chat')['models']
+            self.assertEqual([(x['id'], x['route_label'], x['owned_by'], x['root']) for x in labels], [
+                ('openrouter/nvidia/nemotron','openrouter/nvidia/nemotron','openrouter','nvidia/nemotron'),
+                ('Combo-1','combo/Combo-1','combo','Combo-1'),
+                ('custom-bare','custom-bare','','')])
+            stats = response['diagnostics']
+            self.assertEqual(stats['received'], 1209)
+            self.assertEqual(stats['classified']['chat'], 1208)
+            self.assertEqual(stats['classified']['tts'], 1)
+            self.assertEqual(stats['combos'], 1)
+            self.assertEqual(stats['duplicates_removed'], 1)
+            self.assertEqual(stats['delivered'], 1207)
+            self.assertEqual(stats['source'], 'api')
+            self.assertEqual(listed[-1]['id'], 'combo/default')
+            from fastapi import HTTPException
+            with patch.object(m, '_fetch_catalog', side_effect=m.CatalogError('bad cursor')):
+                with self.assertRaises(HTTPException) as failure:
+                    m.models('chat')
+                self.assertEqual(failure.exception.status_code, 502)
+                self.assertEqual(failure.exception.detail, 'bad cursor')
             config['model']['provider']='different'
             writes.clear()
             m.save_model(m.ModelSelection(kind='chat',model='other/model'))
@@ -305,14 +341,14 @@ class OmniRoute351RegressionTests(unittest.TestCase):
         ]) as getter:
             models = CORE.model_entries('image')
         self.assertEqual([x['id'] for x in models], ['image/a','image/b'])
-        getter.assert_called_once_with('/images/generations')
+        self.assertEqual(getter.call_args.args, ('/images/generations',))
 
     def test_video_uses_official_specialty_catalog(self):
         with patch.object(CORE.catalog, 'get', return_value=[
             {'id':'video/a','type':'video'}, {'id':'video/b','type':'video'}
         ]) as getter:
             self.assertEqual(len(CORE.model_entries('video')),2)
-        getter.assert_called_once_with('/videos/generations')
+        self.assertEqual(getter.call_args.args, ('/videos/generations',))
 
     def test_video_preserves_optional_parameters(self):
         from omniroute_test_backend.providers import video
@@ -366,7 +402,7 @@ class OmniRoute351RegressionTests(unittest.TestCase):
                 CORE.validated_base(url)
 
     def test_video_catalog_fallback_to_models(self):
-        def data(path):
+        def data(path, **kwargs):
             if path=='/videos/generations': return []
             return [{'id':'demo/v1','type':'video'}, {'id':'demo/chat','type':'chat'}]
         with patch.object(CORE.catalog, 'get', side_effect=data):
@@ -380,8 +416,8 @@ class OmniRoute351RegressionTests(unittest.TestCase):
 
     def test_media_catalog_isolated_by_key_and_endpoint(self):
         from unittest.mock import patch as mo
-        with mo.object(CORE, 'call_json',side_effect=[
-              {'data':[{'id':'profile-a'}]}, {'data':[{'id':'profile-b'}]}]) as req:
+        with mo.object(CORE, '_fetch_catalog',side_effect=[
+              [{'id':'profile-a'}], [{'id':'profile-b'}]]) as req:
             c=CORE.Catalog()
             with patch.dict(os.environ,{'OMNIROUTE_API_KEY':'key-a','OMNIROUTE_BASE_URL':'https://a.example/v1'}):
                 a=c.get('/models')
@@ -459,7 +495,7 @@ class OmniRoute353RegressionTests(unittest.TestCase):
         with patch.object(CORE.catalog, 'get', return_value=rows) as get:
             selected = CORE.model_entries('chat')
         self.assertEqual([x['id'] for x in selected], ['model/chat', 'model/legacy', 'model/combo'])
-        get.assert_called_once_with('/models?kind=chat&prefix=alias')
+        self.assertEqual(get.call_args.args, ('/models',))
 
     def test_model_provider_filters_typed_media_and_uses_native_query(self):
         from io import BytesIO
@@ -474,7 +510,7 @@ class OmniRoute353RegressionTests(unittest.TestCase):
                          {'id':'a/tts','type':'audio','subtype':'speech'},
                          {'id':'a/stt','type':'audio','subtype':'transcription'},
                          {'id':'a/embed','type':'embedding'}, {'id':'a/legacy'},
-                         {'id':'a/chat','type':'chat'}]}
+                         {'id':'a/chat','type':'chat'}, {'id':'a/reason','type':'chat','subtype':'reasoning'}, {'id':'a/combo','type':'combo'}]}
         opened=[]
         class FakeOpener:
             def open(self, req, timeout=8):
@@ -482,9 +518,19 @@ class OmniRoute353RegressionTests(unittest.TestCase):
                 return BytesIO(json.dumps(payload).encode())
         with patch.object(module.request,'build_opener',return_value=FakeOpener()):
             ids=module.omniroute.fetch_models(api_key='secret',base_url='https://router.example/v1')
-        self.assertEqual(ids, ['a/chat','a/legacy'])
-        self.assertEqual(opened[0][0], 'https://router.example/v1/models?kind=chat&prefix=alias')
+        self.assertEqual(ids, ['a/chat','a/legacy','a/reason','a/combo'])
+        self.assertEqual(opened[0][0], 'https://router.example/v1/models?prefix=alias&limit=200')
         self.assertEqual(opened[0][1], 'Bearer secret')
+        self.assertTrue(callable(module.omniroute.picker_catalog))
+        self.assertEqual(module.omniroute.base_url_env_var, 'OMNIROUTE_BASE_URL')
+        with patch.object(module.omniroute, 'fetch_models', return_value=['hook/model']) as probe:
+            self.assertEqual(module.omniroute.picker_catalog(True), ['hook/model'])
+            probe.assert_called_once_with()
+        with patch.object(module, '_env', side_effect=lambda name: 'https://router.example/v1' if name.endswith('BASE_URL') else 'scoped-secret'), \
+             patch.object(module.request, 'build_opener') as transport:
+            self.assertIsNone(module.omniroute.fetch_models(api_key='', base_url='https://router.example/v1'))
+            self.assertIsNone(module.omniroute.fetch_models(base_url='https://other.example/v1'))
+            transport.assert_not_called()
 
     def test_image_without_advertised_size_does_not_set_size(self):
         from omniroute_test_backend.providers import image as im
@@ -617,6 +663,91 @@ class OmniRoute353RegressionTests(unittest.TestCase):
             CORE.call('GET','/models?api_key=bad')
         with self.assertRaises(CORE.OmniError):
             CORE.call('GET','/models?kind=chat&prefix=alias#fragment')
+
+
+class CompleteCatalogTests(unittest.TestCase):
+    def test_canonical_catalog_source_and_generated_copy(self):
+        import ast
+        self.assertEqual((ROOT/'backend/catalog_discovery.py').read_bytes(),
+                         (ROOT/'model-provider/catalog_discovery.py').read_bytes())
+        for path in ('backend/core.py', 'backend/dashboard/plugin_api.py', 'model-provider/__init__.py'):
+            nodes = ast.parse((ROOT/path).read_text()).body
+            self.assertFalse(any(isinstance(n, ast.FunctionDef) and n.name in ('_is_chat', '_fetch_catalog', '_fetch_pages') for n in nodes))
+
+    def test_paginated_catalog_over_1000_and_encoded_cursor(self):
+        from io import BytesIO
+        from urllib.parse import urlsplit, parse_qs
+        rows = [{'id': f'p/model {i}+&', 'type':'chat'} for i in range(1205)]
+        class Opener:
+            def open(self, req, timeout):
+                query = parse_qs(urlsplit(req.full_url).query)
+                assert query['prefix'] == ['alias']
+                assert req.get_header('Authorization') == 'Bearer private-key'
+                start = 0 if 'after' not in query else next(i+1 for i,r in enumerate(rows) if r['id'] == query['after'][0])
+                page = rows[start:start+int(query['limit'][0])]
+                return BytesIO(json.dumps({'data':page,'has_more':start+len(page)<len(rows),'last_id':page[-1]['id']}).encode())
+        stats = {}
+        actual = CORE._fetch_catalog('https://router.example/v1','private-key',Opener(), diagnostics=stats)
+        self.assertEqual(actual, rows)
+        self.assertEqual((stats['received'], stats['pages'], stats['requests']), (1205, 7, 7))
+        self.assertEqual(stats['source'], 'api')
+        self.assertNotIn('private-key', json.dumps(stats))
+
+    def test_repeat_cursor_and_invalid_envelope_fail_closed(self):
+        from io import BytesIO
+        class Opener:
+            def open(self, req, timeout):
+                return BytesIO(b'{"data":[{"id":"same"}],"has_more":true,"last_id":"same"}')
+        stats = {}
+        with self.assertRaisesRegex(CORE.CatalogError, 'cursor'):
+            CORE._fetch_catalog('https://router.example/v1','secret',Opener(), diagnostics=stats)
+        self.assertEqual(stats['status'], 'error')
+        self.assertEqual(stats['pages'], 2)
+        self.assertNotIn('secret', json.dumps(stats))
+        class Bad:
+            def open(self, req, timeout):
+                return BytesIO(b'{"data":null}')
+        with self.assertRaisesRegex(CORE.CatalogError, 'envelope'):
+            CORE._fetch_catalog('https://router.example/v1','secret',Bad())
+
+    def test_large_page_retries_smaller_and_specialty_subtypes_stay_out(self):
+        from io import BytesIO
+        from urllib.parse import urlsplit, parse_qs
+        limits = []
+        class Opener:
+            def open(self, req, timeout):
+                limit = int(parse_qs(urlsplit(req.full_url).query)['limit'][0])
+                limits.append(limit)
+                if limit == 200:
+                    return BytesIO(b'x' * (4*1024*1024+1))
+                return BytesIO(b'{"data":[{"id":"ok"}],"has_more":false}')
+        self.assertEqual(CORE._fetch_catalog('https://router.example/v1','secret',Opener()), [{'id':'ok'}])
+        self.assertEqual(limits,[200,100])
+        for row in ({'id':'r','type':'chat','subtype':'reasoning'},
+                    {'id':'c','type':'combo'}, {'id':'legacy'}):
+            self.assertTrue(CORE.is_chat_model(row))
+        for row in ({'id':'tts','type':'chat','subtype':'speech'},
+                    {'id':'emb','type':'embedding'}, {'id':'bad','subtype':'transcription'}):
+            self.assertFalse(CORE.is_chat_model(row))
+
+
+    def test_cache_diagnostics_and_no_credential_in_logs(self):
+        with patch.dict(os.environ, {'OMNIROUTE_BASE_URL':'https://private.example/v1',
+                                     'OMNIROUTE_API_KEY':'private-key'}):
+            with patch.object(CORE, '_fetch_catalog', return_value=[{'id':'demo/chat'}]) as fetch:
+                local = CORE.Catalog()
+                first, second = {}, {}
+                self.assertEqual(local.get('/models', diagnostics=first), local.get('/models', diagnostics=second))
+                self.assertEqual(fetch.call_count, 1)
+                self.assertEqual(first['source'], 'api')
+                self.assertEqual(second['source'], 'cache')
+                self.assertEqual(second['requests'], 0)
+                self.assertNotIn('private-key', json.dumps(second))
+            with patch.object(CORE.catalog, 'get', return_value=[{'id':'demo/chat'}]):
+                with self.assertLogs(CORE.__name__, level='INFO') as logs:
+                    CORE.model_entries('chat')
+                self.assertIn('"delivered": 1', logs.output[0])
+                self.assertNotIn('private-key', logs.output[0])
 
 
 if __name__=='__main__':unittest.main()

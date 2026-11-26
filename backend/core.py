@@ -7,12 +7,13 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import logging
 import re
 import threading
 import time
 from urllib import error, parse, request
 
-VERSION = '0.3.2-beta.1'
+VERSION = '0.4.0-beta.2'
 
 
 class OmniError(RuntimeError):
@@ -158,31 +159,40 @@ def data_items(response: dict) -> list[dict]:
     return [row for row in value if isinstance(row, dict)] if isinstance(value, list) else []
 
 
+from .catalog_discovery import (CatalogError, _fetch_catalog, _is_chat, _is_modality,
+                                select_rows, catalog_diagnostics, new_diagnostics, log_diagnostics)
+
+
 class Catalog:
     def __init__(self):
-        self._cached: dict[str, tuple[float, list[dict], tuple[str, str]]] = {}
+        self._cached: dict[str, tuple[float, list[dict], tuple[str, str], dict]] = {}
         self._lock = threading.Lock()
 
-    def get(self, path: str) -> list[dict]:
+    def get(self, path: str, *, diagnostics=None) -> list[dict]:
+        stats = diagnostics if diagnostics is not None else {}
         # Credentials in cache key aren't exposed; only a fingerprint to avoid cross-key reuse.
         import hashlib
         try:
-            identity = (api_base(), hashlib.sha256(api_key().encode()).hexdigest())
-        except OmniError:
+            root, key = api_base(), api_key()
+            identity = (root, hashlib.sha256(key.encode()).hexdigest())
+        except OmniError as exc:
+            stats.update(new_diagnostics(), status='error', error=str(exc))
             return []
         with self._lock:
             hit = self._cached.get(path)
             if hit and hit[0] > time.monotonic() and hit[2] == identity:
+                stats.update(hit[3], source='cache', duration_ms=0, requests=0, pages=0)
                 return [dict(x) for x in hit[1]]
         try:
-            rows = data_items(call_json('GET', path, timeout=10.0))
-        except OmniError:
-            rows = []
-            ttl = 15
-        else:
-            ttl = 300
+            stats.update(new_diagnostics())
+            rows = _fetch_catalog(root, key, _OPENER, path=path, diagnostics=stats)
+        except CatalogError as exc:
+            stats.update(status='error', error=str(exc))
+            # Never cache a failed or partial discovery as an empty success.
+            return []
+        ttl = 60
         with self._lock:
-            self._cached[path] = (time.monotonic() + ttl, rows, identity)
+            self._cached[path] = (time.monotonic() + ttl, rows, identity, dict(stats))
         return [dict(x) for x in rows]
 
 
@@ -197,56 +207,27 @@ def model_id(explicit: str | None, env_name: str, category: str) -> str:
 
 
 def is_chat_model(row: dict) -> bool:
-    """Honor OmniRoute's `type` taxonomy, including combos with missing type.
-
-    A missing type is treated as chat for backward compatibility with OpenAI
-    catalogs; explicit embedding/media/rerank models must never enter the LLM
-    selector. Audio `subtype` is also checked for malformed third-party rows.
-    """
-    if not isinstance(row.get('id'), str) or not row['id'].strip():
-        return False
-    category = str(row.get('type') or 'chat').strip().lower()
-    return category in {'chat', 'text', 'language', 'llm', 'combo'} and not row.get('subtype')
-
-
-def _is_modality(row: dict, kind: str) -> bool:
-    """Map 3.8.53 model types: audio + subtype speech/transcription."""
-    category = str(row.get('type') or '').strip().lower()
-    subtype = str(row.get('subtype') or '').strip().lower()
-    if kind in {'tts', 'stt'} and category == 'audio':
-        if subtype:
-            return subtype in ({'speech', 'tts'} if kind == 'tts' else {'transcription', 'stt'})
-        # A generic audio entry without subtype is not enough to infer TTS/STT.
-    fields = {str(row.get(k) or '').strip().lower() for k in ('type', 'modality', 'category')}
-    endpoint_names = {
-        'image': ('image', 'images'), 'video': ('video', 'videos'),
-        'tts': ('speech', 'tts', 'audio-speech'),
-        'stt': ('transcription', 'stt', 'audio-transcriptions'),
-    }
-    for key in ('supportedEndpoints', 'supported_endpoints', 'endpoints'):
-        values = row.get(key)
-        if isinstance(values, (tuple, list, set)):
-            fields.update(str(v).strip().lower() for v in values if isinstance(v, str))
-    return any(alias in fields for alias in endpoint_names.get(kind, (kind,)))
+    return _is_chat(row)
 
 
 def model_entries(kind: str) -> list[dict]:
+    stats = new_diagnostics()
+    path = '/models'
     if kind in {'image', 'video'}:
-        endpoint = '/images/generations' if kind == 'image' else '/videos/generations'
-        rows = catalog.get(endpoint)
+        path = '/images/generations' if kind == 'image' else '/videos/generations'
+        rows = catalog.get(path, diagnostics=stats)
         if rows:
-            if kind == 'image':
-                # Keep text-capable image models in the generation picker.
-                return [x for x in rows if isinstance(x.get('id'), str) and (
-                    not isinstance(x.get('input_modalities'), list) or
-                    not x['input_modalities'] or 'text' in x['input_modalities'])]
-            return [x for x in rows if isinstance(x.get('id'), str)]
-    if kind == 'chat':
-        # Filter at OmniRoute BEFORE paging/aliases, then defensively filter
-        # again in case a compatible gateway ignores unknown query params.
-        return [x for x in catalog.get('/models?kind=chat&prefix=alias') if is_chat_model(x)]
-    return [x for x in catalog.get('/models') if isinstance(x.get('id'), str) and
-            _is_modality(x, kind)]
+            selected = select_rows(rows, kind, path)
+            log_diagnostics(logging.getLogger(__name__), catalog_diagnostics(rows, kind, path, stats=stats))
+            return selected
+        # Preserve the existing backend fallback for empty/unavailable specialty catalogs.
+        log_diagnostics(logging.getLogger(__name__), catalog_diagnostics(rows, kind, path, stats=stats))
+        path = '/models'
+        stats = new_diagnostics()
+    rows = catalog.get(path, diagnostics=stats)
+    selected = select_rows(rows, kind, path)
+    log_diagnostics(logging.getLogger(__name__), catalog_diagnostics(rows, kind, path, stats=stats))
+    return selected
 
 
 def picker_models(kind: str, env: str) -> list[dict]:

@@ -1,3 +1,17 @@
+## 0.4.0-beta.2 — Complete authorized model discovery
+
+- Retrieve the unified catalog with bounded, cursor-based paging (`limit` / `after`), preserving the alias namespace and API-key policy. Do not use the narrower literal `kind=chat` server filter; classify chat locally, including legitimate chat subtypes and combos.
+- Remove the dashboard's 1,000-model truncation; deduplicate IDs after modality selection.
+- Keep the 4 MiB per-response safety budget, shrink oversized pages, use a 20-second default per-request timeout, and reject malformed/repeated cursors rather than publish partial catalogs.
+- Register the Hermes v0.23.2 provider-owned catalog hook and base-URL environment metadata without a global endpoint or credential. Do not replace an explicitly empty key with another credential.
+- Log sanitized discovery failures, reduce successful media cache TTL to 60 seconds, and do not cache failed catalogs.
+- Add offline regression coverage for large catalogs, cursor handling, modality segregation, and independent package parity. Hermes Desktop's initial 50-model visibility setting remains unchanged.
+- Centralize catalog discovery in one maintained backend source; generate and verify an identical standalone provider copy.
+- Expose sanitized, structured catalog diagnostics in both plugin UIs and native/backend logs, including API/cache origin and delivered counts.
+- Regenerate and verify the tracked-source SHA-256 manifest in CI.
+- Add route-prefix badges to native Desktop model picker rows via the official SDK; expose exact routing labels and source metadata in plugin settings without rewriting inference IDs.
+- Candidate release; live deployment and official validator results must be checked separately.
+
 ## 0.4.0-beta.1 — Native Hermes Desktop settings
 
 - Added a `backend/desktop/plugin.js` half to the existing `omniroute-media` package; it registers a native OmniRoute settings page and uses `ctx.rest` against the existing profile-scoped API.

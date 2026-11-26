@@ -29,6 +29,18 @@ const PREFERENCES = Object.freeze([
   ['fetch_provider', 'Provedor de extração web (opcional)'],
 ])
 
+// Only the route prefix is authoritative here: the native picker supplies
+// IDs, not OmniRoute's owned_by/root metadata. Never guess a vendor for a bare
+// ID or replace a routing ID with a display label.
+function decorateOmniRouteRow(row) {
+  if (!row || !['omniroute', 'omni-route'].includes(String(row.provider || '').toLowerCase())) return null
+  if (typeof row.model !== 'string' || !row.model.trim()) return null
+  const id = row.model
+  const slash = id.indexOf('/')
+  const prefix = slash > 0 ? id.slice(0, slash) : ''
+  return { badge: prefix || 'Sem prefixo' }
+}
+
 function errorText(error) {
   // Never show raw remote error bodies or echo arbitrary values from the server.
   const status = Number(error?.status ?? error?.statusCode ?? 0)
@@ -89,6 +101,7 @@ function OmniRouteSettings({ rest }) {
   // Never persist this field in browser-side caches or query parameters.
   const [replacementKey, setReplacementKey] = useState('')
   const [readToken, setReadToken] = useState('')
+  const [clearReadToken, setClearReadToken] = useState(false)
   const [filters, setFilters] = useState(initialDiscovery())
   const [discovery, setDiscovery] = useState(null)
   const [page, setPage] = useState(0)
@@ -127,6 +140,7 @@ function OmniRouteSettings({ rest }) {
       incorporateStatus(response)
       setReplacementKey('')
       setReadToken('')
+      setClearReadToken(false)
       setFeedback(success + ' Reinicie/recarregue o Hermes se necessário.')
     } catch (error) {
       setFeedback(errorText(error))
@@ -134,6 +148,7 @@ function OmniRouteSettings({ rest }) {
       // Also clear a failed replacement credential so it isn't kept in state.
       setReplacementKey('')
       setReadToken('')
+      setClearReadToken(false)
       setBusy(false)
     }
   }
@@ -162,16 +177,28 @@ function OmniRouteSettings({ rest }) {
       if (!response || !Array.isArray(response.models)) throw new Error('Invalid models payload')
       const rows = response.models
         .filter(item => item && typeof item.id === 'string' && item.id.length <= 256)
-        .map(item => ({ id: item.id, label: String(item.label || item.id).slice(0, 256) }))
+        .map(item => ({
+          id: item.id,
+          label: typeof item.route_label === 'string' && item.route_label ? item.route_label : item.id,
+        }))
       setCatalogs(previous => ({ ...previous, [kind]: rows }))
-      setFeedback('Catálogo de ' + kind + ': ' + rows.length + ' modelo(s).')
+      const info = response.diagnostics
+      const counts = info && info.classified
+      setFeedback(info && counts
+        ? 'Catálogo de ' + kind + ': ' + rows.length + ' exibidos; ' +
+          info.received + ' recebidos; chat ' + counts.chat + ', imagem ' + counts.image +
+          ', vídeo ' + counts.video + ', TTS ' + counts.tts + ', STT ' + counts.stt +
+          ', combos ' + info.combos + ', outros ' + info.other +
+          '; duplicatas ' + info.duplicates_removed + '; entregues pela API do plugin ' + info.delivered +
+          '; ' + info.pages + ' páginas / ' + info.requests + ' requisições; ' +
+          info.duration_ms + ' ms; origem ' + info.source + '.'
+        : 'Catálogo de ' + kind + ': ' + rows.length + ' modelo(s).')
     } catch (error) {
       setFeedback(errorText(error))
     } finally {
       setBusy(false)
     }
   }
-
 
   function updateFilter(name, value) {
     setFilters(old => ({...old, [name]: value}))
@@ -230,15 +257,16 @@ function OmniRouteSettings({ rest }) {
             }),
           }),
           jsx(Field, {label:'Token de leitura (opcional; deixe vazio para manter)', children:jsx(TextField,{
-            type:'password', value:readToken, onChange:e=>setReadToken(e.target.value),
+            type:'password', value:readToken, disabled:clearReadToken, onChange:e=>setReadToken(e.target.value),
             autoComplete:'new-password', placeholder:state?.read_token_configured?'Token configurado':'Token não configurado'
           })}),
+          checkbox('Remover token de leitura',clearReadToken,v=>{setClearReadToken(v);setReadToken('')}),
           jsxs('div', {
             className: 'flex flex-wrap items-center gap-2',
             children: [
               jsx(Action, {
-                disabled: busy || !(url.trim() || replacementKey || readToken),
-                onClick: () => submit('/connection', { base_url: url.trim(), api_key: replacementKey, read_token:readToken }, 'Conexão salva.'),
+                disabled: busy || !(url.trim() || replacementKey || readToken || clearReadToken),
+                onClick: () => submit('/connection', { base_url: url.trim(), api_key: replacementKey, read_token:readToken, clear_read_token:clearReadToken }, 'Conexão salva.'),
                 children: 'Salvar conexão',
               }),
               jsx(Action, {
@@ -278,7 +306,8 @@ function OmniRouteSettings({ rest }) {
             ...(discovery.warnings||[]).map((w,i)=>jsx('p',{className:'text-xs',children:String(w)},i)),
             discovery.free_summary&&jsx('p',{className:'text-xs',children:'Catálogo global: '+String(discovery.free_summary.modelCount??'—')+' ofertas; não é saldo da conta.'}),
             ...discovery.models.slice(page*50,page*50+50).map(m=>jsxs('div',{className:'border-b py-2',children:[
-              jsx('div',{children:m.label}),jsx('div',{className:'text-xs break-all',children:m.id+' · '+m.kind+(m.free_type?' · '+m.free_type:'')+(m.provider_state?' · '+m.provider_state:'')}),
+              jsx('div',{children:m.label}),jsx('div',{className:'text-xs break-all',children:(m.route_label||m.id)+' · '+m.kind+(m.free_type?' · '+m.free_type:'')+(m.provider_state?' · '+m.provider_state:'')}),
+              m.provider_usage&&jsx('div',{className:'text-xs',children:'Provedor: '+String(m.provider_usage.successes??'—')+'/'+String(m.provider_usage.requests??'—')+' sucessos · '+String(m.provider_usage.avgLatencyMs??'—')+' ms · '+String(m.provider_usage.windowHours??'—')+' h'}),
               ['chat','image','video'].includes(m.kind)&&jsx(Action,{disabled:busy,onClick:()=>setModels(old=>({...old,[m.kind]:m.id})),children:'Usar no campo '+m.kind+' (salvar abaixo)'})
             ]},m.id)),
             jsx(Action,{disabled:page===0||busy,onClick:()=>setPage(p=>p-1),children:'Anterior'}),
@@ -383,6 +412,15 @@ export default {
     // Keep the SDK context as the call receiver; the wrapper is stable
     // across page re-renders so the initial GET effect runs only once.
     const scopedRest = (path, options) => ctx.rest(path, options)
+    // Official SDK contribution: only a textual badge, no DOM patching.
+    // Older Desktop versions simply retain the native unadorned menu.
+    if (typeof sdk.MODEL_MENU_ROW_AREA === 'string') {
+      ctx.register({
+        id: 'omniroute-origin',
+        area: sdk.MODEL_MENU_ROW_AREA,
+        data: { decorate: decorateOmniRouteRow },
+      })
+    }
     const page = {
       id: 'settings',
       title: 'OmniRoute',
