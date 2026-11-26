@@ -10,6 +10,8 @@ import { useEffect, useState } from 'react'
 import { jsx, jsxs } from 'react/jsx-runtime'
 import * as sdk from '@hermes/plugin-sdk'
 
+const UI_VERSION = '0.4.0-beta.3'
+
 const CATEGORIES = Object.freeze([
   ['chat', 'LLM / Chat'],
   ['image', 'Imagens'],
@@ -399,6 +401,18 @@ function OmniRouteSettings({ rest }) {
         className: 'my-3',
         style: { color: 'var(--ui-text-secondary)' },
         children: feedback,
+      }),
+      jsx('footer', {
+        className: 'mt-6 pt-3 border-t text-xs',
+        style: { color: 'var(--ui-text-secondary)' },
+        'aria-label': 'Versão instalada do OmniRoute',
+        children: jsxs('div', { children: [
+          jsx('div', { children: 'OmniRoute · Interface Desktop v' + UI_VERSION }),
+          jsx('div', { children: 'Backend conectado: ' + (state?.plugin_version ? 'v' + state.plugin_version : 'não informado') }),
+          state?.plugin_version && state.plugin_version !== UI_VERSION && jsx('div', {
+            role: 'status', children: 'Versões diferentes: atualize a interface ou o backend.'
+          }),
+        ] }),
       }),
     ],
   })

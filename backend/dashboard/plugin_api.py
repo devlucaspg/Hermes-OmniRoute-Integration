@@ -20,6 +20,8 @@ import ipaddress
 
 router = APIRouter()
 
+PLUGIN_VERSION = '0.4.0-beta.3'
+
 KINDS = {
     'chat': 'OMNIROUTE_CHAT_MODEL',
     'image': 'OMNIROUTE_IMAGE_MODEL',
@@ -91,6 +93,7 @@ class ModelSelection(BaseModel):
 @router.get('/status')
 def status():
     return {
+        'plugin_version': PLUGIN_VERSION,
         'base_url': _value('OMNIROUTE_BASE_URL'),
         'api_key_configured': bool(_secret('OMNIROUTE_API_KEY')),
         'read_token_configured': bool(_secret('OMNIROUTE_READ_TOKEN')),

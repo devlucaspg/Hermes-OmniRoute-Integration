@@ -170,3 +170,8 @@ class Discovery(unittest.TestCase):
             result=api.save_connection(api.Connection(clear_read_token=True))
             save.assert_called_once_with('OMNIROUTE_READ_TOKEN','')
             self.assertEqual(result,{'read_token_configured':False})
+
+    def test_status_reports_installed_backend_version(self):
+        with patch.object(api,'_value',return_value=''), patch.object(api,'_secret',return_value=''), patch.object(api,'_native_model_is_omniroute',return_value=False):
+            result=api.status()
+        self.assertEqual(result['plugin_version'],'0.4.0-beta.3')

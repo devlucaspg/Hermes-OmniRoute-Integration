@@ -2,6 +2,7 @@
   "use strict";
   var SDK = window.__HERMES_PLUGIN_SDK__;
   if (!SDK || !window.__HERMES_PLUGINS__) return;
+  var UI_VERSION = '0.4.0-beta.3';
   var React = SDK.React;
   var h = React.createElement;
   var C = SDK.components;
@@ -148,7 +149,11 @@ const initialDiscovery = () => ({kinds: DISCOVERY_TYPES.map(x=>x[0]), capabiliti
             'Activate OmniRoute as Hermes chat provider')
         )
       ),
-      feedback && h('p', {role:'status', className:'text-sm'}, feedback)
+      feedback && h('p', {role:'status', className:'text-sm'}, feedback),
+      h('footer', {className:'mt-6 pt-3 border-t text-xs','aria-label':'Versão instalada do OmniRoute'},
+        h('div',null,'OmniRoute · Interface Dashboard v'+UI_VERSION),
+        h('div',null,'Backend conectado: '+(state?.plugin_version?'v'+state.plugin_version:'não informado')),
+        state?.plugin_version && state.plugin_version!==UI_VERSION && h('div',{role:'status'},'Versões diferentes: atualize a interface ou o backend.'))
     );
   }
   window.__HERMES_PLUGINS__.register('omniroute-media', Panel);

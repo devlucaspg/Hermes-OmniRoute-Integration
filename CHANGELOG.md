@@ -1,3 +1,9 @@
+## 0.4.0-beta.3 — Native discovery and installed-version diagnostics
+
+- General model discovery with multi-select types and capabilities, AND/OR matching, native filters, complete pagination, free-catalog enrichment and provider reliability.
+- Desktop and Dashboard footers report the interface build and the connected backend version independently, including a mismatch warning.
+- Keep the installed source versions synchronized across manifests, catalog templates and UI; no release tag or main merge until live validation.
+
 ## 0.4.0-beta.2 — Complete authorized model discovery
 
 - Retrieve the unified catalog with bounded, cursor-based paging (`limit` / `after`), preserving the alias namespace and API-key policy. Do not use the narrower literal `kind=chat` server filter; classify chat locally, including legitimate chat subtypes and combos.

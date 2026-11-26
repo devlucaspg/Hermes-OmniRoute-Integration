@@ -236,3 +236,28 @@ test('Dashboard multi-select uses authenticated plugin REST and preserves routin
   assert.ok(JSON.stringify(render()).includes('provider/org/model'));
   assert.equal(calls.some(x=>x.url.endsWith('/activate-chat')),false);
 });
+
+
+test('Desktop footer identifies its own version independently of remote backend', async () => {
+  const c=build({backend:{'/status':{...status,plugin_version:'0.4.0-beta.2'}}});
+  c.render();c.effects()[0]();await tick();
+  const footer=c.flatten(c.render()).find(n=>n.type==='footer');
+  assert.ok(footer);
+  const content=JSON.stringify(footer);
+  assert.ok(content.includes('Interface Desktop v0.4.0-beta.3'));
+  assert.ok(content.includes('Backend conectado: v0.4.0-beta.2'));
+  assert.ok(content.includes('Versões diferentes'));
+});
+
+test('Dashboard and Desktop version markers match the package manifest', () => {
+  const root=path.resolve(__dirname,'..');
+  const manifest=fs.readFileSync(path.join(root,'backend/plugin.yaml'),'utf8');
+  const version=manifest.match(/^version:\s*"([^"]+)"/m)[1];
+  const dashboard=fs.readFileSync(path.join(root,'backend/dashboard/dist/index.js'),'utf8');
+  const api=fs.readFileSync(path.join(root,'backend/dashboard/plugin_api.py'),'utf8');
+  const dashManifest=JSON.parse(fs.readFileSync(path.join(root,'backend/dashboard/manifest.json'),'utf8'));
+  assert.equal(dashManifest.version,version);
+  assert.ok(source.includes("UI_VERSION = '"+version+"'"));
+  assert.ok(dashboard.includes("UI_VERSION = '"+version+"'"));
+  assert.ok(api.includes("PLUGIN_VERSION = '"+version+"'"));
+});
