@@ -305,3 +305,62 @@ class EnrichedDiscovery(unittest.TestCase):
         now=datetime.now(timezone.utc)
         account={'provider':'xkiro','fetchedAt':now.isoformat(),'quotas':{'free_daily':{'remainingPercentage':0,'resetAt':(now-timedelta(seconds=1)).isoformat()}}}
         self.assertEqual(api._enrich.quota_status('xkiro',['free_quota'],[account]),'unknown')
+
+class PinnedProviders(unittest.TestCase):
+    def test_union_independent_of_search_and_no_duplicates(self):
+        search=[rows[0]]
+        configured=rows+[
+            {'id':'web/model','owned_by':'web','root':'model'},
+            {'id':'web/media','owned_by':'web','root':'media','type':'image'}]
+        def fetch(base,key,opener,diagnostics,query_params):
+            if query_params.get('q') == 'a':
+                return search
+            self.assertEqual(query_params,{'prefix':'canonical','configuredOnly':'true'})
+            return configured
+        with patch.object(api,'_value',return_value='https://router.example/v1'), patch.object(api,'_secret',side_effect=lambda n:'synthetic' if n=='OMNIROUTE_API_KEY' else ''), patch.object(api,'_fetch_catalog',side_effect=fetch), patch.object(api,'_apply_picker',return_value={'picker_count':4}) as apply:
+            r=api.discover_models(api.DiscoveryFilters(kinds=['chat'],providers=['p'],pinned_providers=['p','web','web','missing'],q='a',capabilities=['vision'],min_context=65536,configured_only=False,apply_to_picker=True))
+        self.assertEqual(r['search_count'],1)
+        self.assertEqual(r['pinned_count'],6)
+        self.assertEqual(r['pinned_added_count'],5)
+        self.assertEqual(r['count'],6)
+        self.assertEqual(r['missing_pinned_providers'],['missing'])
+        self.assertEqual(r['models'][0]['id'],'p/org/a')
+        self.assertTrue(r['models'][0]['matched_search'])
+        self.assertTrue(r['models'][0]['pinned'])
+        web=next(m for m in r['models'] if m['id']=='web/model')
+        self.assertEqual(web['access'],['unknown_pricing'])
+        self.assertFalse(web['matched_search'])
+        self.assertTrue(web['pinned'])
+        self.assertTrue(any(m['kind']=='image' for m in r['models']))
+        self.assertNotIn('auto/free',[m['id'] for m in r['models']])
+        self.assertEqual(apply.call_args.args[1],r['models'])
+    def test_pin_only_and_configured_provider_list(self):
+        with patch.object(api,'_value',return_value='https://router.example/v1'), patch.object(api,'_secret',side_effect=lambda n:'synthetic' if n=='OMNIROUTE_API_KEY' else ''), patch.object(api,'_fetch_catalog',return_value=rows) as fetch:
+            self.assertEqual(api.configured_providers()['providers'],[{'id':'p','model_count':4}])
+            result=api.discover_models(api.DiscoveryFilters(kinds=[],pinned_providers=['p']))
+        self.assertEqual(result['search_count'],0)
+        self.assertEqual(result['pinned_added_count'],4)
+        self.assertEqual(fetch.call_count,2)
+        self.assertEqual(fetch.call_args.kwargs['query_params'],{'prefix':'canonical','configuredOnly':'true'})
+    def test_pinned_paid_model_does_not_become_free(self):
+        budget={'provider':'p','modelId':'org/a','freeType':'recurring-daily'}
+        def get(url,key):
+            if url.endswith('/free-models'): return {'models':[budget]}
+            if '/free-provider-rankings?' in url: return {'rankings':[]}
+            return {'perModel':[budget]}
+        with patch.object(api,'_value',return_value='https://router.example/v1'), patch.object(api,'_secret',return_value='synthetic'), patch.object(api,'_fetch_catalog',return_value=rows), patch.object(api,'_discovery_get',side_effect=get):
+            result=api.discover_models(api.DiscoveryFilters(kinds=['chat'],free_only=True,pinned_providers=['p']))
+        self.assertEqual(result['search_count'],1)
+        self.assertEqual(result['pinned_added_count'],3)
+        self.assertEqual(next(m for m in result['models'] if m['id']=='p/org/b')['access'],['unknown_pricing'])
+    def test_combined_fetch_reuses_unfiltered_configured_catalog(self):
+        with patch.object(api,'_value',return_value='https://router.example/v1'), patch.object(api,'_secret',side_effect=lambda n:'synthetic' if n=='OMNIROUTE_API_KEY' else ''), patch.object(api,'_fetch_catalog',return_value=rows) as fetch:
+            r=api.discover_models(api.DiscoveryFilters(pinned_providers=['p']))
+        self.assertEqual(fetch.call_count,1)
+        self.assertEqual(r['pinned_added_count'],0)
+        self.assertEqual(r['pinned_count'],4)
+    def test_pinned_catalog_failure_never_applies_picker(self):
+        with patch.object(api,'_value',return_value='https://router.example/v1'), patch.object(api,'_secret',return_value='synthetic'), patch.object(api,'_fetch_catalog',side_effect=[rows,api.CatalogError('failed')]), patch.object(api,'_apply_picker') as apply:
+            with self.assertRaises(HTTPException):
+                api.discover_models(api.DiscoveryFilters(pinned_providers=['p'],q='test',apply_to_picker=True))
+            apply.assert_not_called()

@@ -268,6 +268,7 @@ class DiscoveryFilters(BaseModel):
     capabilities: list[str] = Field(default_factory=list, max_length=11)
     sources: list[str] = Field(default_factory=list, max_length=len(_enrich.SOURCES))
     providers: list[str] = Field(default_factory=list, max_length=64)
+    pinned_providers: list[str] = Field(default_factory=list, max_length=1024)
     access: list[str] = Field(default_factory=list, max_length=9)
     input_modalities: list[str] = Field(default_factory=list, max_length=7)
     output_modalities: list[str] = Field(default_factory=list, max_length=7)
@@ -333,7 +334,8 @@ def _discovery_query(filters: DiscoveryFilters) -> str:
             not set(filters.lifecycle) <= set(_enrich.LIFECYCLE) or
             not set(filters.privacy) <= set(_enrich.PRIVACY) or
             filters.quota_mode not in {'all','potential','confirmed'} or
-            any(not _enrich.safe_id(p) for p in filters.providers)):
+            any(not _enrich.safe_id(p) for p in filters.providers + filters.pinned_providers) or
+            'combo' in filters.pinned_providers):
         raise HTTPException(status_code=422, detail='Invalid discovery filter')
     params = {'prefix': 'canonical'}
     if filters.configured_only:
@@ -515,11 +517,44 @@ def _filtered_rows(rows: list, filters: DiscoveryFilters, free: dict, rankings: 
     return list(result.values())
 
 
+def _configured_provider_index(rows):
+    index = {}
+    for row in rows:
+        if not isinstance(row, dict) or _catalog_module._is_combo(row):
+            continue
+        owner, identifier = row.get('owned_by'), row.get('id')
+        if not _enrich.safe_id(owner) or owner == 'combo' or not _enrich.safe_id(identifier):
+            continue
+        index.setdefault(owner, set()).add(identifier)
+    return index
+
+
+_CONFIGURED_QUERY = {'prefix': 'canonical', 'configuredOnly': 'true'}
+
+
+@router.get('/configured-providers')
+def configured_providers():
+    """Only providers with models visible to this profile's inference key."""
+    base, key = _value('OMNIROUTE_BASE_URL'), _secret('OMNIROUTE_API_KEY')
+    if not base or not key:
+        raise HTTPException(status_code=409, detail='Configure OmniRoute first')
+    base = _valid_url(base)
+    stats = new_diagnostics()
+    try:
+        opener = request.build_opener(request.ProxyHandler({}), _NoRedirect())
+        rows = _fetch_catalog(base, key, opener, diagnostics=stats, query_params=dict(_CONFIGURED_QUERY))
+    except CatalogError as exc:
+        log_diagnostics(logging.getLogger(__name__), stats)
+        raise HTTPException(status_code=502, detail=str(exc)) from None
+    index = _configured_provider_index(rows)
+    return {'providers': [{'id': p, 'model_count': len(ids)} for p, ids in sorted(index.items())]}
+
+
 @router.post('/discover-models')
 def discover_models(filters: DiscoveryFilters):
     path = _discovery_query(filters)
-    if not filters.kinds:
-        return {'models': [], 'count': 0, 'warnings': []}
+    if not filters.kinds and not filters.pinned_providers:
+        return {'models': [], 'count': 0, 'warnings': [], 'search_count': 0, 'pinned_count': 0, 'pinned_added_count': 0}
     base = _value('OMNIROUTE_BASE_URL')
     key = _secret('OMNIROUTE_API_KEY')
     if not base or not key:
@@ -529,11 +564,25 @@ def discover_models(filters: DiscoveryFilters):
     stats = new_diagnostics()
     try:
         opener = request.build_opener(request.ProxyHandler({}), _NoRedirect())
-        rows = _fetch_catalog(base, key, opener, diagnostics=stats, query_params=params)
+        rows = _fetch_catalog(base, key, opener, diagnostics=stats, query_params=params) if filters.kinds else []
+        pinned_rows = []
+        pinned_stats = None
+        if filters.pinned_providers:
+            # Never let text, capability, context or configured_only search
+            # parameters narrow or broaden the independent configured catalog.
+            if filters.kinds and params == _CONFIGURED_QUERY:
+                pinned_rows = rows
+            else:
+                pinned_stats = new_diagnostics()
+                pinned_rows = _fetch_catalog(base, key, opener, diagnostics=pinned_stats, query_params=dict(_CONFIGURED_QUERY))
     except CatalogError as exc:
         log_diagnostics(logging.getLogger(__name__), stats)
         raise HTTPException(status_code=502, detail=str(exc)) from None
     warnings = []
+    pinned_index = _configured_provider_index(pinned_rows)
+    missing_pins = sorted(set(filters.pinned_providers) - set(pinned_index))
+    if missing_pins:
+        warnings.append('Provedores fixos sem modelos autorizados/configurados: ' + ', '.join(missing_pins))
     free = {}
     rankings = {}
     summary = None
@@ -545,18 +594,18 @@ def discover_models(filters: DiscoveryFilters):
     management = token or key
     if base.startswith('https://'):
         root = _management_root(base)
-        if token or filters.free_only or filters.access:
+        if token or (filters.kinds and (filters.free_only or filters.access)):
             try:
                 catalog = _discovery_get(root + '/free-models', management).get('models')
                 if not isinstance(catalog, list) or not catalog:
                     raise HTTPException(status_code=502, detail='Free catalog unavailable')
                 free = _free_index(catalog)
             except HTTPException:
-                if filters.free_only and not filters.sources:
+                if filters.kinds and filters.free_only and not filters.sources:
                     raise HTTPException(status_code=502, detail='Free catalog unavailable; configure a read token') from None
                 incomplete = True
                 warnings.append('Free catalog unavailable')
-        if token or filters.free_only or filters.access:
+        if token or (filters.kinds and (filters.free_only or filters.access)):
             try:
                 items = _discovery_get(root + '/free-provider-rankings?configuredOnly=true&availableOnly=true&withUsage=true&sortBy=reliability&limit=100', management).get('rankings')
                 if not isinstance(items, list):
@@ -597,16 +646,17 @@ def discover_models(filters: DiscoveryFilters):
                 summary = None
                 warnings.append('Free tier summary unavailable')
                 if filters.free_only or set(filters.access).intersection(_enrich.FREE): incomplete = True
-    elif filters.free_only:
+    elif filters.kinds and filters.free_only:
         raise HTTPException(status_code=409, detail='Free discovery requires HTTPS')
-    if filters.free_only:
+    if filters.kinds and filters.free_only:
         if summary is None:
             warnings.append('Free-tier summary could not be verified; results reflect the baseline catalog only.')
         warnings.append('Cataloged free offers only; account eligibility and zero cost are not guaranteed. Unverified combos excluded.')
     external, source_states = {}, {}
     if filters.sources:
-        owners = {r.get('owned_by') for r in rows if isinstance(r.get('owned_by'),str)}
+        owners = {r.get('owned_by') for r in rows if isinstance(r,dict) and isinstance(r.get('owned_by'),str)}
         if filters.providers: owners.intersection_update(filters.providers)
+        owners.update(set(filters.pinned_providers).intersection(pinned_index))
         external, source_states = _enrich.collect(_picker_home(),filters.sources,owners,filters.cache_hours*3600)
         for source, state in source_states.items():
             if state['status'] != 'ok':
@@ -633,7 +683,31 @@ def discover_models(filters: DiscoveryFilters):
         except HTTPException:
             warnings.append('Model health unavailable; no pause state could be verified.')
             incomplete = True
-    models = _filtered_rows(rows, filters, free, rankings, external, accounts, health, retired, summary)
+    search_models = _filtered_rows(rows, filters, free, rankings, external, accounts, health, retired, summary)
+    pinned_models = []
+    selected_pins = sorted(set(filters.pinned_providers).intersection(pinned_index))
+    if selected_pins:
+        # Independent UNION: bypass ALL search criteria, but never gateway
+        # authorization or the configured-only restriction. Retain true access
+        # tags and health metadata; a pinned paid model does not become free.
+        pin_filters = DiscoveryFilters(providers=selected_pins, configured_only=True,
+                                       include_combos=False)
+        pinned_models = _filtered_rows(pinned_rows, pin_filters, free, rankings,
+                                      external, accounts, health, retired, summary)
+        pinned_models = [m for m in pinned_models
+                         if m['id'] in pinned_index.get(m['provider'], set())]
+    union = {m['id']: dict(m, matched_search=True, pinned=False) for m in search_models}
+    for m in pinned_models:
+        if m['id'] in union:
+            union[m['id']]['pinned'] = True
+        else:
+            union[m['id']] = dict(m, matched_search=False, pinned=True)
+    models = list(union.values())
+    pinned_added = len(models) - len(search_models)
+    if pinned_added:
+        warnings.append('Provedores fixos acrescentam modelos fora dos filtros; podem incluir ofertas pagas, cotas esgotadas ou bloqueios.')
+    if pinned_stats is not None:
+        stats['pinned_catalog'] = pinned_stats
     # Only publish a completed successful discovery, including empty results.
     selection = _apply_picker(filters, models, base) if filters.apply_to_picker and not incomplete else {}
     if filters.apply_to_picker and incomplete:
@@ -641,4 +715,6 @@ def discover_models(filters: DiscoveryFilters):
     stats['delivered'] = len(models)
     log_diagnostics(logging.getLogger(__name__), stats)
     return {'models': models, 'count': len(models), 'warnings': warnings, 'free_summary': summary,
-            'diagnostics': stats, 'source_states': source_states, 'picker_applied': bool(selection), **selection}
+            'diagnostics': stats, 'source_states': source_states, 'picker_applied': bool(selection),
+            'search_count': len(search_models), 'pinned_count': len(pinned_models),
+            'pinned_added_count': pinned_added, 'missing_pinned_providers': missing_pins, **selection}
