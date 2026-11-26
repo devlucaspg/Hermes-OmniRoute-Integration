@@ -245,7 +245,7 @@ test('Desktop footer identifies its own version independently of remote backend'
   const footer=c.flatten(c.render()).find(n=>n.type==='footer');
   assert.ok(footer);
   const content=JSON.stringify(footer);
-  assert.ok(content.includes('Interface Desktop v0.4.0-beta.6'));
+  assert.ok(content.includes('Interface Desktop v0.5.0-beta.1'));
   assert.ok(content.includes('Backend conectado: v0.4.0-beta.2'));
   assert.ok(content.includes('Versões diferentes'));
 });

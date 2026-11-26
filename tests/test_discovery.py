@@ -174,7 +174,7 @@ class Discovery(unittest.TestCase):
     def test_status_reports_installed_backend_version(self):
         with patch.object(api,'_value',return_value=''), patch.object(api,'_secret',return_value=''), patch.object(api,'_native_model_is_omniroute',return_value=False):
             result=api.status()
-        self.assertEqual(result['plugin_version'],'0.4.0-beta.6')
+        self.assertEqual(result['plugin_version'],'0.5.0-beta.1')
 
 
     def test_picker_selection_profile_endpoint_and_empty(self):
@@ -207,3 +207,44 @@ class Discovery(unittest.TestCase):
             self.assertEqual(api._catalog_module.read_picker_selection(home,'https://router.example/v1'),saved)
             api.discover_models(api.DiscoveryFilters(kinds=['embedding'],apply_to_picker=True))
             self.assertEqual(api._catalog_module.read_picker_selection(home,'https://router.example/v1')['ids'],[])
+
+class EnrichedDiscovery(unittest.TestCase):
+    def test_exact_provider_identity_and_paid_conflict(self):
+        source=[{'id':'nvidia/org/model','owned_by':'nvidia','root':'org/model'},
+                {'id':'nvidia/model','owned_by':'nvidia','root':'model'},
+                {'id':'openrouter/org/model','owned_by':'openrouter','root':'org/model'},
+                {'id':'alias','owned_by':'nvidia','root':'org/model'}]
+        ext={('nvidia','org/model'):{'access':['free_preview'],'kind':'chat','source':'fixture','context_length':131072,'capabilities':['reasoning']},
+             ('openrouter','org/model'):{'access':['paid'],'source':'fixture'}}
+        baseline={('openrouter','org/model'):{'freeType':'recurring-daily'}}
+        result=api._filtered_rows(source,api.DiscoveryFilters(free_only=True,capabilities=['reasoning'],min_context=65536),baseline,{},ext)
+        self.assertEqual([r['id'] for r in result],['nvidia/org/model'])
+        self.assertEqual(result[0]['access'],['free_preview'])
+        self.assertEqual(api._filtered_rows(source,api.DiscoveryFilters(free_only=True),baseline,{},ext,retired={('nvidia','org/model')}),[])
+    def test_nvidia_exact_schema(self):
+        spec={'paths':{'/v1/chat/completions':{'post':{'requestBody':{'content':{'application/json':{'schema':{'$ref':'#/components/schemas/Req'}}}}}}},
+              'components':{'schemas':{'Req':{'properties':{'model':{'default':'moonshotai/kimi-k3.1-pro'}}}}}}
+        self.assertEqual(api._enrich.nvidia_ids(spec),{'moonshotai/kimi-k3.1-pro'})
+        spec['components']['schemas']['Req']['properties']['model']['enum']=['other/model']
+        self.assertEqual(api._enrich.nvidia_ids(spec),set())
+    def test_public_sources_do_not_send_keys_and_cache(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as home, patch.dict(api._enrich.ADAPTERS,{'nvidia':lambda:([{'model_id':'org/model','access':['free_preview'],'source':'fixture'}],0,0)}):
+            first,state=api._enrich.collect(home,['nvidia'],{'nvidia'},3600)
+            self.assertEqual(state['nvidia']['status'],'ok')
+            with patch.dict(api._enrich.ADAPTERS,{'nvidia':lambda:(_ for _ in ()).throw(RuntimeError())}):
+                second,state=api._enrich.collect(home,['nvidia'],{'nvidia'},3600)
+                self.assertEqual(first,second)
+    def test_quota_unknown_and_health_filter(self):
+        self.assertEqual(api._enrich.quota_status('nvidia',['free_preview'],[]),'unknown')
+        self.assertEqual(api._enrich.quota_status('ollama-local',['local'],[]),'not_applicable')
+        self.assertEqual(api._filtered_rows(rows,api.DiscoveryFilters(exclude_cooling=True),{}, {},health={'p/org/a':'cooling'})[0]['id'],'p/org/b')
+    def test_enriched_query_keeps_rows_for_local_filter(self):
+        q=parse_qs(urlsplit(api._discovery_query(api.DiscoveryFilters(sources=['nvidia'],capabilities=['reasoning'],min_context=65536))).query)
+        self.assertNotIn('capability',q)
+        self.assertNotIn('min_context',q)
+    def test_partial_source_preserves_picker(self):
+        with patch.object(api,'_value',return_value='https://router.example/v1'), patch.object(api,'_secret',side_effect=lambda n:'synthetic' if n=='OMNIROUTE_API_KEY' else ''), patch.object(api,'_fetch_catalog',return_value=rows), patch.object(api,'_picker_home',return_value='/unused'), patch.object(api._enrich,'collect',return_value=({}, {'nvidia':{'status':'unavailable'}})), patch.object(api,'_apply_picker') as apply:
+            r=api.discover_models(api.DiscoveryFilters(sources=['nvidia'],apply_to_picker=True))
+            self.assertFalse(r['picker_applied'])
+            apply.assert_not_called()

@@ -1,3 +1,7 @@
+# 0.5.0-beta.1
+
+- Experimental provider metadata adapters, explicit access taxonomy, profile-local TTL cache, quota and health filters, and enriched Desktop/Dashboard discovery. See docs/ENRICHED-MODEL-DISCOVERY.md.
+
 ## 0.4.0-beta.6 — Round context labels down
 
 - Display context limits using the lower whole thousand while preserving exact numeric API values in Desktop and Dashboard.

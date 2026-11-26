@@ -2,7 +2,7 @@
   "use strict";
   var SDK = window.__HERMES_PLUGIN_SDK__;
   if (!SDK || !window.__HERMES_PLUGINS__) return;
-  var UI_VERSION = '0.4.0-beta.6';
+  var UI_VERSION = '0.5.0-beta.1';
   // Dashboard's --foreground can be transparent; use the opaque base tokens.
   var SELECT_COLORS = {backgroundColor:'var(--background-base, Canvas)',color:'var(--midground-base, CanvasText)',colorScheme:'light dark'};
   var contextLabel = n => n ? Math.floor(n / 1000).toLocaleString('pt-BR') + ' mil tokens' : 'Sem restrição';
@@ -15,8 +15,14 @@
   ];
 
 const DISCOVERY_TYPES = [['chat','LLM / Chat'],['embedding','Embeddings'],['image','Imagem'],['audio','Áudio'],['video','Vídeo'],['rerank','Reranking'],['moderation','Moderação'],['music','Música']]
-const DISCOVERY_CAPABILITIES = [['tool_calling','Tool calling'],['reasoning','Raciocínio'],['thinking','Thinking'],['vision','Visão'],['structured_output','Saída estruturada'],['attachment','Anexos'],['temperature','Temperatura']]
-const initialDiscovery = () => ({kinds: DISCOVERY_TYPES.map(x=>x[0]), capabilities: [], match:'and', configured_only:true, free_only:false, include_combos:true, min_context:0, q:''})
+const DISCOVERY_CAPABILITIES = [['tool_calling','Tool calling'],['reasoning','Raciocínio'],['thinking','Thinking'],['vision','Visão'],['structured_output','Saída estruturada'],['attachment','Anexos'],['temperature','Temperatura'],['parallel_tool_calling','Ferramentas em paralelo'],['streaming','Streaming'],['coding','Programação'],['fim','FIM']]
+const ACCESS_TAGS = [['free','Gratuito'],['free_quota','Cota gratuita'],['free_credits','Créditos recorrentes'],['trial_credits','Créditos iniciais'],['free_preview','Preview gratuito'],['subscription','Assinatura'],['paid','Pago'],['local','Local'],['unknown_pricing','Desconhecido']]
+const SOURCES = [['nvidia','NVIDIA NGC'],['openrouter','OpenRouter'],['xkiro','xKiro'],['llm7','LLM7']]
+const ADVANCED = [['input_modalities','Entrada',['text','image','audio','video','document']],['output_modalities','Saída',['text','image','audio','video','embedding','rerank']],['lifecycle','Ciclo de vida',['stable','preview','experimental','deprecated','legacy']],['privacy','Privacidade e utilização',['open_weights','open_source','prompt_training','no_prompt_training','commercial_use','development_only']]]
+const PROVIDERS = ['nvidia','openrouter','xkiro','llm7','ollama-local','gemini','groq','mistral','cloudflare-ai','sambanova','nara','github','chatgpt-web','deepseek-web','combo']
+const TAG_LABELS = Object.fromEntries(ACCESS_TAGS)
+const metadataLine = m => (m.access||[]).map(t=>TAG_LABELS[t]||t).join(' · ')+' | Cota: '+({confirmed:'saldo observado',exhausted:'esgotada',not_applicable:'não aplicável',unknown:'desconhecida'}[m.quota_status]||'desconhecida')+' | Saúde: '+(m.health_status||'unknown')
+const initialDiscovery = () => ({kinds: DISCOVERY_TYPES.map(x=>x[0]), capabilities: [], match:'and', configured_only:true, free_only:false, include_combos:true, min_context:0, q:'', sources:SOURCES.map(x=>x[0]), providers:[], access:[], input_modalities:[], output_modalities:[], lifecycle:[], privacy:[], cache_hours:6, quota_mode:'potential', exclude_cooling:true})
 
   var base = '/api/plugins/omniroute-media';
   function Field(label, input) {
@@ -91,16 +97,26 @@ const initialDiscovery = () => ({kinds: DISCOVERY_TYPES.map(x=>x[0]), capabiliti
         h(C.CardHeader,null,h(C.CardTitle,null,'Catálogo geral — Model Discovery')),
         h(C.CardContent,null,
           Field('Pesquisa',h(C.Input,{value:filters.q,maxLength:200,disabled:loading,onChange:e=>updateFilter('q',e.target.value)})),
-          ...[['configured_only','Somente configurados'],['free_only','Somente catalogados como gratuitos'],['include_combos','Incluir Combos e Auto-Combos']].map(([k,l])=>check(l,filters[k],v=>updateFilter(k,v))),
+          ...[['configured_only','Somente configurados'],['free_only','Somente ofertas gratuitas ou locais'],['include_combos','Incluir Combos e Auto-Combos']].map(([k,l])=>check(l,filters[k],v=>updateFilter(k,v))),
+          h('h3',null,'Modalidade de acesso'),
+          h('div',{className:'grid grid-cols-2 gap-1'},ACCESS_TAGS.map(([k,l])=>check(l,filters.access.includes(k),v=>toggleFilter('access',k,v)))),
+          h('details',null,h('summary',null,'Provedores e fontes de descoberta'),
+            h('p',{className:'text-xs'},'Provedores (nenhum = todos). Fontes públicas sem credenciais.'),
+            h('div',{className:'grid grid-cols-2 gap-1'},PROVIDERS.map(k=>check(k,filters.providers.includes(k),v=>toggleFilter('providers',k,v)))),
+            h('div',{className:'grid grid-cols-2 gap-1'},SOURCES.map(([k,l])=>check(l,filters.sources.includes(k),v=>toggleFilter('sources',k,v)))),
+            Field('Cache (horas)',h('select',{style:SELECT_COLORS,value:filters.cache_hours,onChange:e=>updateFilter('cache_hours',Number(e.target.value))},[1,3,6,12,24].map(n=>h('option',{style:SELECT_COLORS,value:n,key:n},String(n)))))),
           h('h3',null,'Tipos de modelo'),
           check('Todos os tipos',filters.kinds.length===DISCOVERY_TYPES.length,v=>updateFilter('kinds',v?DISCOVERY_TYPES.map(x=>x[0]):[])),
           h('div',{className:'grid grid-cols-2 gap-1'},DISCOVERY_TYPES.map(([k,l])=>check(l,filters.kinds.includes(k),v=>toggleFilter('kinds',k,v)))),
           h('h3',null,'Capacidades'),
-          check('Qualquer capacidade (sem restrição)',filters.capabilities.length===0,v=>updateFilter('capabilities',v?[]:['tool_calling'])),
+          check('Qualquer capacidade (sem restrição)',filters.capabilities.length===0,v=>updateFilter('capabilities',[])),
           check('Selecionar todas as capacidades',filters.capabilities.length===DISCOVERY_CAPABILITIES.length,v=>updateFilter('capabilities',v?DISCOVERY_CAPABILITIES.map(x=>x[0]):[])),
           h('div',{className:'grid grid-cols-2 gap-1'},DISCOVERY_CAPABILITIES.map(([k,l])=>check(l,filters.capabilities.includes(k),v=>toggleFilter('capabilities',k,v)))),
           Field('Correspondência',h('select',{style:SELECT_COLORS,className:'w-full p-2 rounded border',value:filters.match,disabled:loading,onChange:e=>updateFilter('match',e.target.value)},h('option',{style:SELECT_COLORS,value:'and'},'Todas (AND)'),h('option',{style:SELECT_COLORS,value:'or'},'Pelo menos uma (OR)'))),
           Field('Contexto mínimo',h('select',{style:SELECT_COLORS,className:'w-full p-2 rounded border',value:filters.min_context,disabled:loading,onChange:e=>updateFilter('min_context',Number(e.target.value))},[0,32768,65536,131072,262144,524288,1048576].map(n=>h('option',{style:SELECT_COLORS,key:n,value:n},contextLabel(n))))),
+          h('details',null,h('summary',null,'Filtros avançados'),ADVANCED.map(([name,label,items])=>h('div',{key:name},h('h3',null,label),h('div',{className:'grid grid-cols-2 gap-1'},items.map(k=>check(k,filters[name].includes(k),v=>toggleFilter(name,k,v))))))),
+          Field('Cotas',h('select',{style:SELECT_COLORS,value:filters.quota_mode,onChange:e=>updateFilter('quota_mode',e.target.value)},[['all','Não verificar'],['potential','Excluir esgotadas conhecidas'],['confirmed','Saldo observado ou local']].map(([k,l])=>h('option',{style:SELECT_COLORS,value:k,key:k},l)))),
+          check('Excluir bloqueios temporários observados',filters.exclude_cooling,v=>updateFilter('exclude_cooling',v)),
           h(C.Button,{disabled:loading||!filters.kinds.length,onClick:discoverAll},'Consultar catálogo'),
           h('p',{className:'text-xs'},'A consulta bem-sucedida aplica os modelos de chat ao seletor da conversa. Use Atualizar modelos no seletor.'),
           Number.isInteger(state?.picker_count)&&h('p',{className:'text-xs'},'Catálogo aplicado: '+state.picker_count+' modelo(s) de chat.'),
@@ -109,7 +125,8 @@ const initialDiscovery = () => ({kinds: DISCOVERY_TYPES.map(x=>x[0]), capabiliti
           discovery&&h('div',null,h('p',null,discovery.models.length+' modelo(s) encontrados'),
             (discovery.warnings||[]).map((w,i)=>h('p',{key:i,className:'text-xs'},String(w))),
             discovery.free_summary&&h('p',{className:'text-xs'},'Catálogo global: '+String(discovery.free_summary.modelCount??'—')+' ofertas; não é saldo da conta.'),
-            discovery.models.slice(page*50,page*50+50).map(m=>h('div',{key:m.id,className:'border-b py-2'},h('div',null,m.label),h('div',{className:'text-xs break-all'},(m.route_label||m.id)+' · '+m.kind+(m.free_type?' · '+m.free_type:'')+(m.provider_state?' · '+m.provider_state:'')),m.provider_usage&&h('div',{className:'text-xs'},'Provedor: '+String(m.provider_usage.successes??'—')+'/'+String(m.provider_usage.requests??'—')+' sucessos · '+String(m.provider_usage.avgLatencyMs??'—')+' ms · '+String(m.provider_usage.windowHours??'—')+' h'),['chat','image','video'].includes(m.kind)&&h(C.Button,{disabled:loading,onClick:()=>setSelections(old=>({...old,[m.kind]:m.id}))},'Usar no campo '+m.kind+' (salvar abaixo)'))),
+            Object.entries(discovery.source_states||{}).map(([k,v])=>h('p',{key:k,className:'text-xs'},k+': '+v.status+' · '+String(v.count??0)+' registros')),
+            discovery.models.slice(page*50,page*50+50).map(m=>h('div',{key:m.id,className:'border-b py-2'},h('div',null,m.label),h('div',{className:'text-xs break-all'},(m.route_label||m.id)+' · '+m.kind+(m.free_type?' · '+m.free_type:'')+(m.provider_state?' · '+m.provider_state:'')),m.access&&h('div',{className:'text-xs'},metadataLine(m)),m.sources&&h('div',{className:'text-xs break-all'},'Fontes: '+m.sources.join(' · ')),m.provider_usage&&h('div',{className:'text-xs'},'Provedor: '+String(m.provider_usage.successes??'—')+'/'+String(m.provider_usage.requests??'—')+' sucessos · '+String(m.provider_usage.avgLatencyMs??'—')+' ms · '+String(m.provider_usage.windowHours??'—')+' h'),['chat','image','video'].includes(m.kind)&&h(C.Button,{disabled:loading,onClick:()=>setSelections(old=>({...old,[m.kind]:m.id}))},'Usar no campo '+m.kind+' (salvar abaixo)'))),
             h(C.Button,{disabled:page===0||loading,onClick:()=>setPage(p=>p-1)},'Anterior'),
             h(C.Button,{disabled:(page+1)*50>=discovery.models.length||loading,onClick:()=>setPage(p=>p+1)},'Próxima'))
         )

@@ -20,7 +20,7 @@ import ipaddress
 
 router = APIRouter()
 
-PLUGIN_VERSION = '0.4.0-beta.6'
+PLUGIN_VERSION = '0.5.0-beta.1'
 
 KINDS = {
     'chat': 'OMNIROUTE_CHAT_MODEL',
@@ -253,14 +253,29 @@ def models(kind: str = 'chat'):
 
 # Read-only general discovery. The existing category-specific picker remains
 # compatible with older Hermes and OmniRoute installations.
+_enrich_spec = spec_from_file_location(__name__ + '_enriched_discovery',
+                                        Path(__file__).resolve().parents[1] / 'discovery.py')
+_enrich = module_from_spec(_enrich_spec)
+_enrich_spec.loader.exec_module(_enrich)
+
 DISCOVERY_KINDS = ('chat', 'embedding', 'image', 'audio', 'video', 'rerank', 'moderation', 'music')
 DISCOVERY_CAPS = ('tool_calling', 'reasoning', 'thinking', 'vision',
-                  'structured_output', 'attachment', 'temperature')
+                  'structured_output', 'attachment', 'temperature') + _enrich.EXTRA_CAPS
 
 
 class DiscoveryFilters(BaseModel):
     kinds: list[str] = Field(default_factory=lambda: list(DISCOVERY_KINDS), max_length=8)
-    capabilities: list[str] = Field(default_factory=list, max_length=7)
+    capabilities: list[str] = Field(default_factory=list, max_length=11)
+    sources: list[str] = Field(default_factory=list, max_length=4)
+    providers: list[str] = Field(default_factory=list, max_length=64)
+    access: list[str] = Field(default_factory=list, max_length=9)
+    input_modalities: list[str] = Field(default_factory=list, max_length=7)
+    output_modalities: list[str] = Field(default_factory=list, max_length=7)
+    lifecycle: list[str] = Field(default_factory=list, max_length=5)
+    privacy: list[str] = Field(default_factory=list, max_length=6)
+    cache_hours: int = Field(default=6, ge=1, le=24)
+    quota_mode: str = 'all'
+    exclude_cooling: bool = False
     match: str = 'and'
     configured_only: bool = True
     free_only: bool = False
@@ -311,17 +326,24 @@ def _apply_picker(filters, models, base):
 def _discovery_query(filters: DiscoveryFilters) -> str:
     if (not set(filters.kinds) <= set(DISCOVERY_KINDS) or
             not set(filters.capabilities) <= set(DISCOVERY_CAPS) or
-            filters.match not in {'and', 'or'}):
+            filters.match not in {'and', 'or'} or
+            not set(filters.sources) <= set(_enrich.SOURCES) or
+            not set(filters.access) <= set(_enrich.ACCESS) or
+            not set(filters.input_modalities + filters.output_modalities) <= set(_enrich.MODALITIES) or
+            not set(filters.lifecycle) <= set(_enrich.LIFECYCLE) or
+            not set(filters.privacy) <= set(_enrich.PRIVACY) or
+            filters.quota_mode not in {'all','potential','confirmed'} or
+            any(not _enrich.safe_id(p) for p in filters.providers)):
         raise HTTPException(status_code=422, detail='Invalid discovery filter')
     params = {'prefix': 'canonical'}
     if filters.configured_only:
         params['configuredOnly'] = 'true'
     # Keep typed combos and legacy chat aliases visible as in the stable picker.
-    if len(set(filters.kinds)) == 1 and filters.kinds[0] != 'chat':
+    if not filters.sources and len(set(filters.kinds)) == 1 and filters.kinds[0] != 'chat':
         params['kind'] = filters.kinds[0]
-    if filters.capabilities and (filters.match == 'and' or len(set(filters.capabilities)) == 1):
+    if not filters.sources and filters.capabilities and not set(filters.capabilities).intersection(_enrich.EXTRA_CAPS) and (filters.match == 'and' or len(set(filters.capabilities)) == 1):
         params['capability'] = ','.join(dict.fromkeys(filters.capabilities))
-    if filters.min_context:
+    if filters.min_context and not filters.sources:
         params['min_context'] = str(filters.min_context)
     if filters.q.strip():
         params['q'] = filters.q.strip()
@@ -368,7 +390,9 @@ def _free_index(rows: list) -> dict:
     return result
 
 
-def _filtered_rows(rows: list, filters: DiscoveryFilters, free: dict, rankings: dict) -> list:
+def _filtered_rows(rows: list, filters: DiscoveryFilters, free: dict, rankings: dict,
+                   external=None, accounts=None, health=None, retired=None, summary=None) -> list:
+    external, health, retired = external or {}, health or {}, retired or set()
     result = {}
     kinds = set(filters.kinds)
     caps = set(filters.capabilities)
@@ -380,8 +404,16 @@ def _filtered_rows(rows: list, filters: DiscoveryFilters, free: dict, rankings: 
             continue
         is_combo = _catalog_module._is_combo(row)
         owner = owner if isinstance(owner, str) else ('combo' if is_combo else '')
+        root = row.get('root')
+        # An external offer belongs to the exact canonical route only.
+        identity = (owner, root) if isinstance(root, str) and identifier == owner + '/' + root and not is_combo else None
+        metadata = external.get(identity, {}) if identity else {}
+        if filters.providers and owner not in filters.providers:
+            continue
         raw_kind = row.get('type')
-        if _is_chat(row):
+        if not raw_kind and metadata.get('kind') in DISCOVERY_KINDS:
+            kind = metadata['kind']
+        elif _is_chat(row):
             kind = 'chat'
         elif _catalog_module._is_modality(row, 'tts') or _catalog_module._is_modality(row, 'stt'):
             kind = 'audio'
@@ -395,24 +427,67 @@ def _filtered_rows(rows: list, filters: DiscoveryFilters, free: dict, rankings: 
             continue
         flags = row.get('capabilities')
         flags = flags if isinstance(flags, dict) else {}
-        matches = [flags.get(cap) is True for cap in caps]
+        effective_caps = {c for c in DISCOVERY_CAPS if flags.get(c) is True}
+        effective_caps.update(c for c in metadata.get('capabilities', []) if c in DISCOVERY_CAPS and flags.get(c) is not False)
+        inputs = metadata.get('input', [])
+        outputs = metadata.get('output', [])
+        if 'image' in inputs and flags.get('vision') is not False:
+            effective_caps.add('vision')
+        matches = [cap in effective_caps for cap in caps]
         if matches and not (all(matches) if filters.match == 'and' else any(matches)):
             continue
         context = row.get('context_length')
+        # Never increase a known gateway limit using the upstream model spec.
+        if not isinstance(context, (int,float)) or context <= 0:
+            context = metadata.get('context_length')
         if filters.min_context and (not isinstance(context, (float, int)) or context < filters.min_context):
             continue
-        root = row.get('root')
-        # No suffix stripping or name matching: variants and aliases may have
-        # distinct prices. Combos are not proven free by their names or ranking.
-        budget = free.get((owner, root)) if isinstance(root, str) and not is_combo else None
-        if filters.free_only and not budget:
+        budget = free.get(identity) if identity else None
+        access = list(metadata.get('access', []))
+        # An explicit upstream paid classification overrides historical native offers.
+        if not access and budget:
+            tag = _enrich.NATIVE_ACCESS.get(budget.get('freeType'))
+            if tag:
+                access = [tag]
+        if identity in retired:
+            access = [a for a in access if a not in _enrich.FREE]
+        if identity and owner == 'ollama-local' and filters.configured_only:
+            access = ['local']
+        if not access:
+            access = ['unknown_pricing']
+        if filters.free_only and not set(access).intersection(_enrich.FREE | {'local'}):
             continue
+        if filters.access and not set(access).intersection(filters.access):
+            continue
+        if filters.lifecycle and metadata.get('lifecycle') not in filters.lifecycle:
+            continue
+        privacy = []
+        if budget and budget.get('trainsOnPrompts') is True: privacy.append('prompt_training')
+        if budget and budget.get('trainsOnPrompts') is False: privacy.append('no_prompt_training')
+        if filters.privacy and not set(filters.privacy) <= set(privacy): continue
+        if filters.input_modalities and not set(filters.input_modalities) <= set(inputs): continue
+        if filters.output_modalities and not set(filters.output_modalities) <= set(outputs): continue
+        quota = _enrich.quota_status(owner,access,accounts)
+        if filters.quota_mode == 'confirmed' and quota not in {'confirmed','not_applicable'}: continue
+        if filters.quota_mode == 'potential' and quota == 'exhausted': continue
+        state = health.get(identifier,'unknown')
+        if filters.exclude_cooling and state == 'cooling': continue
+        sources = ['omniroute']
+        if metadata: sources.append(metadata['source'])
+        if budget: sources.append('omniroute-free-catalog')
+        provenance = {'route': 'omniroute'}
+        if metadata: provenance['public_metadata'] = {'source':metadata['source'],'fetched_at':metadata.get('fetched_at')}
+        if budget: provenance['native_offer'] = {'source':'omniroute-free-catalog','catalog_updated_at':(summary or {}).get('catalogUpdatedAt')}
         rank = rankings.get(owner, {})
         if any(ord(c) < 32 or ord(c) == 127 for c in identifier):
             continue
         result.setdefault(identifier, {'id': identifier, 'label': str(row.get('display_name') or row.get('name') or identifier)[:256],
                               'kind': kind, 'provider': owner, 'context_length': context,
-                              'capabilities': [cap for cap in DISCOVERY_CAPS if flags.get(cap) is True],
+                              'capabilities': [cap for cap in DISCOVERY_CAPS if cap in effective_caps],
+                              'access': access, 'input': inputs, 'output': outputs,
+                              'lifecycle': metadata.get('lifecycle'), 'privacy': privacy,
+                              'parameter_count': metadata.get('parameter_count'), 'pricing': metadata.get('pricing'),
+                              'quota_status': quota, 'health_status': state, 'sources': sources, 'provenance': provenance,
                               'free_type': budget.get('freeType') if budget else None,
                               'free_metadata': {f: budget.get(f) for f in ('monthlyTokens', 'creditTokens', 'poolKey', 'tos', 'hardStopGuaranteed', 'trainsOnPrompts', 'eligibilityGate')} if budget else None,
                               'provider_state': rank.get('state'), 'provider_usage': rank.get('usage'),
@@ -442,23 +517,26 @@ def discover_models(filters: DiscoveryFilters):
     free = {}
     rankings = {}
     summary = None
+    retired = set()
+    incomplete = False
     token = _secret('OMNIROUTE_READ_TOKEN')
     # A separate read-only token is preferred. Never send a management
     # credential over plain HTTP, or silently escalate privileges.
     management = token or key
     if base.startswith('https://'):
         root = _management_root(base)
-        if token or filters.free_only:
+        if token or filters.free_only or filters.access:
             try:
                 catalog = _discovery_get(root + '/free-models', management).get('models')
                 if not isinstance(catalog, list) or not catalog:
                     raise HTTPException(status_code=502, detail='Free catalog unavailable')
                 free = _free_index(catalog)
             except HTTPException:
-                if filters.free_only:
+                if filters.free_only and not filters.sources:
                     raise HTTPException(status_code=502, detail='Free catalog unavailable; configure a read token') from None
+                incomplete = True
                 warnings.append('Free catalog unavailable')
-        if token or filters.free_only:
+        if token or filters.free_only or filters.access:
             try:
                 items = _discovery_get(root + '/free-provider-rankings?configuredOnly=true&availableOnly=true&withUsage=true&sortBy=reliability&limit=100', management).get('rankings')
                 if not isinstance(items, list):
@@ -483,6 +561,7 @@ def discover_models(filters: DiscoveryFilters):
                 budgets = data.get('perModel')
                 if not isinstance(budgets, list):
                     raise HTTPException(status_code=502, detail='Invalid free tier summary')
+                retired = {(b.get('provider'),b.get('modelId')) for b in budgets if isinstance(b,dict) and b.get('enabled') is False and isinstance(b.get('provider'),str) and isinstance(b.get('modelId'),str)}
                 if free:
                     detailed = _free_index(budgets)
                     # Only enrich existing exact matches, never promote an
@@ -495,6 +574,7 @@ def discover_models(filters: DiscoveryFilters):
                              if f in detailed[k]}) if k in detailed else v for k, v in free.items()
                             if k in detailed}
             except HTTPException:
+                summary = None
                 warnings.append('Free tier summary unavailable')
     elif filters.free_only:
         raise HTTPException(status_code=409, detail='Free discovery requires HTTPS')
@@ -502,10 +582,42 @@ def discover_models(filters: DiscoveryFilters):
         if summary is None:
             warnings.append('Free-tier summary could not be verified; results reflect the baseline catalog only.')
         warnings.append('Cataloged free offers only; account eligibility and zero cost are not guaranteed. Unverified combos excluded.')
-    models = _filtered_rows(rows, filters, free, rankings)
+    external, source_states = {}, {}
+    if filters.sources:
+        owners = {r.get('owned_by') for r in rows if isinstance(r.get('owned_by'),str)}
+        if filters.providers: owners.intersection_update(filters.providers)
+        external, source_states = _enrich.collect(_picker_home(),filters.sources,owners,filters.cache_hours*3600)
+        for source, state in source_states.items():
+            if state['status'] != 'ok':
+                warnings.append(source + ': public metadata incomplete or unavailable.')
+                incomplete = True
+            if state.get('unresolved'):
+                warnings.append(source + ': '+str(state['unresolved'])+' catalog resources have no unique inference ID.')
+    accounts, health = [], {}
+    if filters.quota_mode != 'all':
+        try:
+            data = _discovery_get(base+'/me/status',key)
+            if not isinstance(data.get('accountQuotas'), list):
+                raise HTTPException(status_code=502,detail='Account quotas unavailable')
+            accounts = data['accountQuotas']
+        except HTTPException:
+            warnings.append('Account quota status unavailable; unknown is not exhausted.')
+            if filters.quota_mode == 'confirmed': incomplete = True
+    if filters.exclude_cooling:
+        try:
+            data = _discovery_get(base+'/models/health',key)
+            if not isinstance(data.get('data'), list):
+                raise HTTPException(status_code=502,detail='Model health unavailable')
+            health = {r['id']:r.get('state','unknown') for r in data['data'] if isinstance(r,dict) and isinstance(r.get('id'),str)}
+        except HTTPException:
+            warnings.append('Model health unavailable; no pause state could be verified.')
+            incomplete = True
+    models = _filtered_rows(rows, filters, free, rankings, external, accounts, health, retired, summary)
     # Only publish a completed successful discovery, including empty results.
-    selection = _apply_picker(filters, models, base) if filters.apply_to_picker else {}
+    selection = _apply_picker(filters, models, base) if filters.apply_to_picker and not incomplete else {}
+    if filters.apply_to_picker and incomplete:
+        warnings.append('Incomplete discovery: previous conversation picker preserved.')
     stats['delivered'] = len(models)
     log_diagnostics(logging.getLogger(__name__), stats)
     return {'models': models, 'count': len(models), 'warnings': warnings, 'free_summary': summary,
-            'diagnostics': stats, **selection}
+            'diagnostics': stats, 'source_states': source_states, 'picker_applied': bool(selection), **selection}
