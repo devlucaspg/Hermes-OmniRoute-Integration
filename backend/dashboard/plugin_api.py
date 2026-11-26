@@ -429,8 +429,15 @@ def _filtered_rows(rows: list, filters: DiscoveryFilters, free: dict, rankings: 
         flags = flags if isinstance(flags, dict) else {}
         effective_caps = {c for c in DISCOVERY_CAPS if flags.get(c) is True}
         effective_caps.update(c for c in metadata.get('capabilities', []) if c in DISCOVERY_CAPS and flags.get(c) is not False)
-        inputs = metadata.get('input', [])
-        outputs = metadata.get('output', [])
+        inputs = list(metadata.get('input', []))
+        outputs = list(metadata.get('output', []))
+        if kind == 'chat':
+            if 'text' not in inputs: inputs.append('text')
+            if 'text' not in outputs: outputs.append('text')
+        if flags.get('vision') is False:
+            inputs = [m for m in inputs if m != 'image']
+        elif flags.get('vision') is True and 'image' not in inputs:
+            inputs.append('image')
         if 'image' in inputs and flags.get('vision') is not False:
             effective_caps.add('vision')
         matches = [cap in effective_caps for cap in caps]
@@ -478,6 +485,13 @@ def _filtered_rows(rows: list, filters: DiscoveryFilters, free: dict, rankings: 
         provenance = {'route': 'omniroute'}
         if metadata: provenance['public_metadata'] = {'source':metadata['source'],'fetched_at':metadata.get('fetched_at')}
         if budget: provenance['native_offer'] = {'source':'omniroute-free-catalog','catalog_updated_at':(summary or {}).get('catalogUpdatedAt')}
+        provenance['access'] = metadata['source'] if metadata.get('access') and not (identity in retired) else (
+            'omniroute-free-catalog' if budget and set(access).intersection(_enrich.FREE) else
+            'omniroute-configured-local-route' if 'local' in access else 'unknown')
+        provenance['context_length'] = 'omniroute' if isinstance(row.get('context_length'),(int,float)) and row['context_length']>0 else metadata.get('source')
+        provenance['health'] = 'omniroute:/models/health' if identifier in health else None
+        provenance['quota'] = 'omniroute:/me/status' if quota in {'confirmed','exhausted'} else None
+        active_budget = budget if budget and set(access).intersection(_enrich.FREE) else None
         rank = rankings.get(owner, {})
         if any(ord(c) < 32 or ord(c) == 127 for c in identifier):
             continue
@@ -488,8 +502,8 @@ def _filtered_rows(rows: list, filters: DiscoveryFilters, free: dict, rankings: 
                               'lifecycle': metadata.get('lifecycle'), 'privacy': privacy,
                               'parameter_count': metadata.get('parameter_count'), 'pricing': metadata.get('pricing'),
                               'quota_status': quota, 'health_status': state, 'sources': sources, 'provenance': provenance,
-                              'free_type': budget.get('freeType') if budget else None,
-                              'free_metadata': {f: budget.get(f) for f in ('monthlyTokens', 'creditTokens', 'poolKey', 'tos', 'hardStopGuaranteed', 'trainsOnPrompts', 'eligibilityGate')} if budget else None,
+                              'free_type': active_budget.get('freeType') if active_budget else None,
+                              'free_metadata': {f: budget.get(f) for f in ('monthlyTokens', 'creditTokens', 'poolKey', 'tos', 'hardStopGuaranteed', 'trainsOnPrompts', 'eligibilityGate')} if active_budget else None,
                               'provider_state': rank.get('state'), 'provider_usage': rank.get('usage'),
                               'route_label': identifier if '/' in identifier or not owner else owner + '/' + identifier})
     return list(result.values())

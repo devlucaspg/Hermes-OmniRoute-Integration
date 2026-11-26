@@ -5,11 +5,11 @@ remains on OmniRoute. Public catalogs only supplement exact authorized canonical
 routing IDs (owner + "/" + root). No upstream credentials are requested or forwarded.
 
 - NVIDIA NGC search + OpenAPI request schema: nim_type_preview; no AVAILABLE-based
-  rejection, no name guessing. Non-model resources and ambiguous specs are reported.
+  rejection, no name guessing. Non-model resources, null specifications and ambiguous specs are reported as unresolved, not guessed.
 - OpenRouter: exact :free variant with zero prompt/completion price; additional
   modalities and positive token prices are not proof of free access.
-- xKiro: explicit access_tier. Premium is subscription classification, not proof
-  of entitlement. LLM7: turbo + not usage_based_only is a limited offer.
+- xKiro: explicit access_tier. Premium and paid require a paid account; neither proves
+  a subscription entitlement. LLM7: turbo + not usage_based_only is a limited offer.
 - Ollama: local route only when configuredOnly is enabled; not proof of zero energy cost.
 - Profile-local atomic JSON cache, on-demand refresh after TTL (default 6 hours);
   expired/failed entries do not establish free access. Partial results preserve picker.

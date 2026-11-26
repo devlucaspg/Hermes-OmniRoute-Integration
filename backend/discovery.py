@@ -100,8 +100,12 @@ def _nvidia_detail(row):
     spec, attrs = data.get("openAPISpec"), data.get("attributes")
     spec = json.loads(spec) if isinstance(spec, str) else spec
     attrs = json.loads(attrs) if isinstance(attrs, str) else attrs
+    # Several public NGC resources deliberately have no OpenAPI spec. They
+    # are unresolved, not a transport failure. Never guess a model ID.
+    if spec is None:
+        return []
     if not isinstance(spec, dict):
-        raise ValueError("Missing OpenAPI specification")
+        raise ValueError("Invalid OpenAPI specification")
     attrs = record(attrs)
     props, caps = record(attrs.get("specifications")), record(attrs.get("modelCapability"))
     kind = {"/v1/chat/completions":"chat", "/v1/embeddings":"embedding",
@@ -116,6 +120,7 @@ def _nvidia_detail(row):
 
 def nvidia():
     rows = {}
+    seen_resources = set()
     expected = None
     for page in range(10):
         q = parse.urlencode({"q":json.dumps({"query":"","page":page,"pageSize":100})})
@@ -131,11 +136,16 @@ def nvidia():
                 raise ValueError("Invalid NVIDIA group")
             for row in group["resources"]:
                 row = record(row)
+                if safe_id(row.get("resourceId")):
+                    seen_resources.add(row["resourceId"])
                 if row.get("orgName") == "qc69jvmznzxy" and row.get("isPublic") is True and safe_id(row.get("resourceId")) and any(
                     "nim_type_preview" in array(record(l).get("unresolvedValues")) for l in array(row.get("labels"))):
                     rows[row["resourceId"]] = row
         if page + 1 >= total:
             break
+    # Search responses can include repeated scored/grouped resources.
+    if type(data.get("resultTotal")) is not int or len(seen_resources) < data["resultTotal"]:
+        raise ValueError("Incomplete NVIDIA catalog")
     if not rows or len(rows) > 120:
         raise ValueError("Empty or excessive NVIDIA offers")
     # AVAILABLE is deliberately not interpreted as account health.
@@ -184,8 +194,17 @@ def xkiro():
     result = []
     for r in _rows(url):
         tier = r.get("access_tier")
-        access = {"free":["free_quota"],"paid":["paid"],"premium":["subscription"]}.get(tier,[])
-        result.append({"model_id":r["id"],"access":access,"source":url,
+        # Paid and premium require a plan or funded balance; neither proves
+        # that a subscription actually includes the route for this account.
+        access = {"free":["free_quota"],"paid":["paid"],"premium":["paid"]}.get(tier,[])
+        caps = record(r.get("capabilities"))
+        kind = {"chat":"chat","image":"image","audio":"audio","embedding":"embedding",
+                "video":"video"}.get(r.get("modality"))
+        inputs = ["text"] if kind == "chat" else []
+        if caps.get("vision") is True and kind == "chat": inputs.append("image")
+        result.append({"model_id":r["id"],"access":access,"source":url,"kind":kind,
+                       "input":inputs,"output":["text"] if kind=="chat" else [],
+                       "capabilities":[k for a,k in (("vision","vision"),("tools","tool_calling"),("reasoning","reasoning")) if caps.get(a) is True],
                        "context_length":positive_int(r.get("context_length"))})
     return result, 0, 0
 
@@ -198,8 +217,12 @@ def llm7():
             ["paid"] if r.get("usage_based_only") is True else [])
         caps = [k for field,k in (("reasoning","reasoning"),("tools_calling","tool_calling"),
                  ("stream","streaming")) if r.get(field) is True]
-        result.append({"model_id":r["id"],"access":access,"source":url,
-                       "context_length":positive_int(r.get("context_window")),"capabilities":caps})
+        mod = record(r.get("modalities"))
+        kind = {"chat":"chat","image":"image","audio_to_text":"audio"}.get(r.get("model_type"))
+        context = r.get("context_window")
+        result.append({"model_id":r["id"],"access":access,"source":url,"kind":kind,
+                       "context_length":positive_int(record(context).get("tokens") if isinstance(context,dict) else context),
+                       "input":modalities(mod.get("input")),"output":modalities(mod.get("output")),"capabilities":caps})
     return result, 0, 0
 
 ADAPTERS = {"nvidia":nvidia,"openrouter":openrouter,"xkiro":xkiro,"llm7":llm7}
@@ -209,7 +232,10 @@ def _cached(home, source, ttl):
     now = time.time()
     try:
         with path.open("rb") as f:
-            data = json.loads(f.read(MAX_BYTES+1))
+            payload = f.read(MAX_BYTES+1)
+        if len(payload) > MAX_BYTES:
+            raise ValueError("Cache too large")
+        data = json.loads(payload)
         if (data.get("schema") == 1 and data.get("source") == source and
                 0 <= now - data["fetched_at"] < ttl and isinstance(data.get("entries"),list)):
             return data

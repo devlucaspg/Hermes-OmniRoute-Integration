@@ -272,7 +272,7 @@ test('all Desktop native dropdown options use explicit theme colors; context lab
   search.props.onClick(); await tick();
   nodes=c.flatten(c.render());
   const selects=nodes.filter(n=>n.type==='select');
-  assert.equal(selects.length,3);
+  assert.equal(selects.length,5);
   for(const select of selects) {
     assert.ok(select.props.style.backgroundColor);
     assert.ok(select.props.style.color);
@@ -291,4 +291,19 @@ test('all Desktop native dropdown options use explicit theme colors; context lab
   const button=c.flatten(c.render()).find(n=>n.type==='button'&&n.props.children==='Consultar catálogo');
   button.props.onClick(); await tick();
   assert.equal(c.calls.at(-1).options.body.min_context,65536);
+});
+
+test('enrichment controls preserve exact access and quota filters', async () => {
+  const c = build({backend:{'/status':status,'/discover-models':{models:[],warnings:[],picker_applied:false}}});
+  c.render(); c.effects()[0](); await tick();
+  const toggle=(label,checked)=>{const n=c.flatten(c.render()).find(n=>n.type==='label'&&Array.isArray(n.props.children)&&n.props.children.includes(label));assert.ok(n,label);n.props.children.find(x=>x?.type==='input').props.onChange({target:{checked}});};
+  toggle('Preview gratuito',true);toggle('OpenRouter',false);
+  const quota=c.flatten(c.render()).find(n=>n.type==='select'&&n.props.value==='potential');
+  assert.ok(quota);quota.props.onChange({target:{value:'confirmed'}});
+  c.flatten(c.render()).find(n=>n.type==='button'&&n.props.children==='Consultar catálogo').props.onClick();await tick();
+  const body=c.calls.at(-1).options.body;
+  assert.equal(JSON.stringify(body.access),JSON.stringify(['free_preview']));
+  assert.equal(body.sources.includes('openrouter'),false);
+  assert.equal(body.quota_mode,'confirmed');
+  assert.equal(body.apply_to_picker,true);
 });

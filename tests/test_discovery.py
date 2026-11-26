@@ -248,3 +248,24 @@ class EnrichedDiscovery(unittest.TestCase):
             r=api.discover_models(api.DiscoveryFilters(sources=['nvidia'],apply_to_picker=True))
             self.assertFalse(r['picker_applied'])
             apply.assert_not_called()
+
+    def test_nvidia_missing_spec_is_unresolved(self):
+        with patch.object(api._enrich,'public_json',return_value={'openAPISpec':None}):
+            self.assertEqual(api._enrich._nvidia_detail({'name':'audio-example'}),[])
+    def test_xkiro_paid_and_premium_not_free_and_vision(self):
+        sample={'data':[{'id':'cohere/a','access_tier':'free','modality':'chat','capabilities':{'vision':True,'tools':True}},
+                        {'id':'org/premium','access_tier':'premium','modality':'chat'}]}
+        with patch.object(api._enrich,'public_json',return_value=sample):
+            entries,_,_=api._enrich.xkiro()
+        self.assertEqual(entries[0]['access'],['free_quota'])
+        self.assertEqual(entries[0]['input'],['text','image'])
+        self.assertEqual(entries[1]['access'],['paid'])
+    def test_llm7_nested_context(self):
+        sample={'data':[{'id':'example','tier':'turbo','usage_based_only':False,'model_type':'chat','context_window':{'tokens':32000},'modalities':{'input':['text'],'output':['text']}}]}
+        with patch.object(api._enrich,'public_json',return_value=sample):
+            entries,_,_=api._enrich.llm7()
+        self.assertEqual(entries[0]['context_length'],32000)
+    def test_native_explicit_negative_vision(self):
+        row={'id':'nvidia/org/m','owned_by':'nvidia','root':'org/m','capabilities':{'vision':False}}
+        external={('nvidia','org/m'):{'source':'fixture','input':['text','image'],'capabilities':['vision']}}
+        self.assertEqual(api._filtered_rows([row],api.DiscoveryFilters(input_modalities=['image']),{}, {},external),[])

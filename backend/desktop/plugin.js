@@ -38,7 +38,8 @@ const ACCESS_TAGS = [['free','Gratuito'],['free_quota','Cota gratuita'],['free_c
 const SOURCES = [['nvidia','NVIDIA NGC'],['openrouter','OpenRouter'],['xkiro','xKiro'],['llm7','LLM7']]
 const ADVANCED = [['input_modalities','Entrada',['text','image','audio','video','document']],['output_modalities','Saída',['text','image','audio','video','embedding','rerank']],['lifecycle','Ciclo de vida',['stable','preview','experimental','deprecated','legacy']],['privacy','Privacidade e utilização',['open_weights','open_source','prompt_training','no_prompt_training','commercial_use','development_only']]]
 const PROVIDERS = ['nvidia','openrouter','xkiro','llm7','ollama-local','gemini','groq','mistral','cloudflare-ai','sambanova','nara','github','chatgpt-web','deepseek-web','combo']
-const TAG_LABELS = Object.fromEntries(ACCESS_TAGS)
+const TAG_LABELS = Object.fromEntries([...ACCESS_TAGS,...DISCOVERY_CAPABILITIES,['text','Texto'],['image','Imagem'],['audio','Áudio'],['video','Vídeo'],['document','Documentos'],['embedding','Embedding'],['rerank','Reranking'],['stable','Estável'],['preview','Preview'],['experimental','Experimental'],['deprecated','Descontinuado'],['legacy','Legado'],['open_weights','Pesos abertos'],['open_source','Código aberto'],['prompt_training','Treina com prompts'],['no_prompt_training','Não treina com prompts'],['commercial_use','Uso comercial'],['development_only','Apenas desenvolvimento']])
+const detailsLine = m => [Number.isFinite(m.context_length)&&'Contexto: '+contextLabel(m.context_length),Number.isFinite(m.parameter_count)&&'Parâmetros: '+m.parameter_count.toLocaleString('pt-BR'),...(m.capabilities||[]).map(t=>TAG_LABELS[t]||t)].filter(Boolean).join(' · ')
 const metadataLine = m => (m.access||[]).map(t=>TAG_LABELS[t]||t).join(' · ')+' | Cota: '+({confirmed:'saldo observado',exhausted:'esgotada',not_applicable:'não aplicável',unknown:'desconhecida'}[m.quota_status]||'desconhecida')+' | Saúde: '+(m.health_status||'unknown')
 const initialDiscovery = () => ({kinds: DISCOVERY_TYPES.map(x=>x[0]), capabilities: [], match:'and', configured_only:true, free_only:false, include_combos:true, min_context:0, q:'', sources:SOURCES.map(x=>x[0]), providers:[], access:[], input_modalities:[], output_modalities:[], lifecycle:[], privacy:[], cache_hours:6, quota_mode:'potential', exclude_cooling:true})
 
@@ -330,7 +331,7 @@ function OmniRouteSettings({ rest }) {
             jsx('option',{style:SELECT_COLORS,value:'and',children:'Todas as selecionadas (AND)'}),jsx('option',{style:SELECT_COLORS,value:'or',children:'Pelo menos uma (OR)'})
           ]})}),
           jsx(Field,{label:'Contexto mínimo',children:jsx('select',{style:SELECT_STYLE,className:'w-full rounded border px-2 py-1.5',value:filters.min_context,disabled:busy,onChange:e=>updateFilter('min_context',Number(e.target.value)),children:[0,32768,65536,131072,262144,524288,1048576].map(n=>jsx('option',{style:SELECT_COLORS,value:n,children:contextLabel(n)},n))})}),
-          jsxs('details',{children:[jsx('summary',{children:'Filtros avançados'}),...ADVANCED.map(([name,label,items])=>jsxs('div',{children:[jsx(Title,{children:label}),jsx('div',{className:'grid grid-cols-2 gap-1',children:items.map(k=>checkbox(k,filters[name].includes(k),v=>toggleFilter(name,k,v)))})]},name))]}),
+          jsxs('details',{children:[jsx('summary',{children:'Filtros avançados'}),...ADVANCED.map(([name,label,items])=>jsxs('div',{children:[jsx(Title,{children:label}),jsx('div',{className:'grid grid-cols-2 gap-1',children:items.map(k=>checkbox(TAG_LABELS[k]||k,filters[name].includes(k),v=>toggleFilter(name,k,v)))})]},name))]}),
           jsx(Field,{label:'Cotas',children:jsx('select',{style:SELECT_STYLE,value:filters.quota_mode,onChange:e=>updateFilter('quota_mode',e.target.value),children:[['all','Não verificar'],['potential','Excluir esgotadas conhecidas'],['confirmed','Saldo observado ou local']].map(([k,l])=>jsx('option',{style:SELECT_COLORS,value:k,children:l},k))})}),
           checkbox('Excluir bloqueios temporários observados',filters.exclude_cooling,v=>updateFilter('exclude_cooling',v)),
           jsx(Action,{disabled:busy||!filters.kinds.length,onClick:discoverAll,children:'Consultar catálogo'}),
@@ -346,6 +347,7 @@ function OmniRouteSettings({ rest }) {
             ...discovery.models.slice(page*50,page*50+50).map(m=>jsxs('div',{className:'border-b py-2',children:[
               jsx('div',{children:m.label}),jsx('div',{className:'text-xs break-all',children:(m.route_label||m.id)+' · '+m.kind+(m.free_type?' · '+m.free_type:'')+(m.provider_state?' · '+m.provider_state:'')}),
               m.access&&jsx('div',{className:'text-xs',children:metadataLine(m)}),
+              jsx('div',{className:'text-xs',children:detailsLine(m)}),
               m.sources&&jsx('div',{className:'text-xs break-all',children:'Fontes: '+m.sources.join(' · ')}),
               m.provider_usage&&jsx('div',{className:'text-xs',children:'Provedor: '+String(m.provider_usage.successes??'—')+'/'+String(m.provider_usage.requests??'—')+' sucessos · '+String(m.provider_usage.avgLatencyMs??'—')+' ms · '+String(m.provider_usage.windowHours??'—')+' h'}),
               ['chat','image','video'].includes(m.kind)&&jsx(Action,{disabled:busy,onClick:()=>setModels(old=>({...old,[m.kind]:m.id})),children:'Usar no campo '+m.kind+' (salvar abaixo)'})
