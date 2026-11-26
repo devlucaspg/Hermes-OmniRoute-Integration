@@ -245,7 +245,7 @@ test('Desktop footer identifies its own version independently of remote backend'
   const footer=c.flatten(c.render()).find(n=>n.type==='footer');
   assert.ok(footer);
   const content=JSON.stringify(footer);
-  assert.ok(content.includes('Interface Desktop v0.5.0-beta.1'));
+  assert.ok(content.includes('Interface Desktop v0.5.0-beta.2'));
   assert.ok(content.includes('Backend conectado: v0.4.0-beta.2'));
   assert.ok(content.includes('Versões diferentes'));
 });
@@ -306,4 +306,15 @@ test('enrichment controls preserve exact access and quota filters', async () => 
   assert.equal(body.sources.includes('openrouter'),false);
   assert.equal(body.quota_mode,'confirmed');
   assert.equal(body.apply_to_picker,true);
+});
+
+test('legacy full source selection migrates; explicit opt-outs remain intact', async () => {
+  const c=build({backend:{'/status':{...status,picker_filters:{sources:['nvidia','openrouter','xkiro','llm7']}},'/discover-models':{models:[],warnings:[]}}});
+  c.render();c.effects()[0]();await tick();
+  c.flatten(c.render()).find(n=>n.type==='button'&&n.props.children==='Consultar catálogo').props.onClick();await tick();
+  assert.equal(c.calls.at(-1).options.body.sources.length,9);
+  const d=build({backend:{'/status':{...status,picker_filters:{sources:['nvidia']}},'/discover-models':{models:[],warnings:[]}}});
+  d.render();d.effects()[0]();await tick();
+  d.flatten(d.render()).find(n=>n.type==='button'&&n.props.children==='Consultar catálogo').props.onClick();await tick();
+  assert.equal(JSON.stringify(d.calls.at(-1).options.body.sources),JSON.stringify(['nvidia']));
 });

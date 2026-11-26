@@ -10,7 +10,7 @@ import { useEffect, useState } from 'react'
 import { jsx, jsxs } from 'react/jsx-runtime'
 import * as sdk from '@hermes/plugin-sdk'
 
-const UI_VERSION = '0.5.0-beta.1'
+const UI_VERSION = '0.5.0-beta.2'
 
 // The host declares color-scheme: light even for custom dark palettes.
 // Explicit opaque foreground AND background prevent pale text on the
@@ -35,13 +35,20 @@ const CATEGORIES = Object.freeze([
 const DISCOVERY_TYPES = [['chat','LLM / Chat'],['embedding','Embeddings'],['image','Imagem'],['audio','Áudio'],['video','Vídeo'],['rerank','Reranking'],['moderation','Moderação'],['music','Música']]
 const DISCOVERY_CAPABILITIES = [['tool_calling','Tool calling'],['reasoning','Raciocínio'],['thinking','Thinking'],['vision','Visão'],['structured_output','Saída estruturada'],['attachment','Anexos'],['temperature','Temperatura'],['parallel_tool_calling','Ferramentas em paralelo'],['streaming','Streaming'],['coding','Programação'],['fim','FIM']]
 const ACCESS_TAGS = [['free','Gratuito'],['free_quota','Cota gratuita'],['free_credits','Créditos recorrentes'],['trial_credits','Créditos iniciais'],['free_preview','Preview gratuito'],['subscription','Assinatura'],['paid','Pago'],['local','Local'],['unknown_pricing','Desconhecido']]
-const SOURCES = [['nvidia','NVIDIA NGC'],['openrouter','OpenRouter'],['xkiro','xKiro'],['llm7','LLM7']]
+const SOURCES = [['nvidia','NVIDIA NGC'],['openrouter','OpenRouter'],['xkiro','xKiro'],['llm7','LLM7'],['gemini','Gemini'],['groq','Groq'],['cloudflare-ai','Cloudflare Workers AI'],['sambanova','SambaNova'],['mistral','Mistral Labs']]
 const ADVANCED = [['input_modalities','Entrada',['text','image','audio','video','document']],['output_modalities','Saída',['text','image','audio','video','embedding','rerank']],['lifecycle','Ciclo de vida',['stable','preview','experimental','deprecated','legacy']],['privacy','Privacidade e utilização',['open_weights','open_source','prompt_training','no_prompt_training','commercial_use','development_only']]]
 const PROVIDERS = ['nvidia','openrouter','xkiro','llm7','ollama-local','gemini','groq','mistral','cloudflare-ai','sambanova','nara','github','chatgpt-web','deepseek-web','combo']
 const TAG_LABELS = Object.fromEntries([...ACCESS_TAGS,...DISCOVERY_CAPABILITIES,['text','Texto'],['image','Imagem'],['audio','Áudio'],['video','Vídeo'],['document','Documentos'],['embedding','Embedding'],['rerank','Reranking'],['stable','Estável'],['preview','Preview'],['experimental','Experimental'],['deprecated','Descontinuado'],['legacy','Legado'],['open_weights','Pesos abertos'],['open_source','Código aberto'],['prompt_training','Treina com prompts'],['no_prompt_training','Não treina com prompts'],['commercial_use','Uso comercial'],['development_only','Apenas desenvolvimento']])
 const detailsLine = m => [Number.isFinite(m.context_length)&&'Contexto: '+contextLabel(m.context_length),Number.isFinite(m.parameter_count)&&'Parâmetros: '+m.parameter_count.toLocaleString('pt-BR'),...(m.capabilities||[]).map(t=>TAG_LABELS[t]||t)].filter(Boolean).join(' · ')
 const metadataLine = m => (m.access||[]).map(t=>TAG_LABELS[t]||t).join(' · ')+' | Cota: '+({confirmed:'saldo observado',exhausted:'esgotada',not_applicable:'não aplicável',unknown:'desconhecida'}[m.quota_status]||'desconhecida')+' | Saúde: '+(m.health_status||'unknown')
 const initialDiscovery = () => ({kinds: DISCOVERY_TYPES.map(x=>x[0]), capabilities: [], match:'and', configured_only:true, free_only:false, include_combos:true, min_context:0, q:'', sources:SOURCES.map(x=>x[0]), providers:[], access:[], input_modalities:[], output_modalities:[], lifecycle:[], privacy:[], cache_hours:6, quota_mode:'potential', exclude_cooling:true})
+const restoreDiscovery = saved => {
+  if (!saved || typeof saved !== 'object') return initialDiscovery()
+  const result = {...initialDiscovery(),...saved}
+  const prior = ['nvidia','openrouter','xkiro','llm7']
+  if (Array.isArray(saved.sources) && saved.sources.length===prior.length && prior.every(s=>saved.sources.includes(s))) result.sources=SOURCES.map(x=>x[0])
+  return result
+}
 
 const PREFERENCES = Object.freeze([
   ['tts_voice', 'Voz TTS específica do provedor'],
@@ -134,7 +141,7 @@ function OmniRouteSettings({ rest }) {
   function incorporateStatus(next) {
     if (!next || typeof next !== 'object') throw new Error('Invalid server status')
     setState(next)
-    setFilters(next.picker_filters ? {...initialDiscovery(), ...next.picker_filters} : initialDiscovery())
+    setFilters(restoreDiscovery(next.picker_filters))
     setDiscovery(null)
     setPage(0)
     setUrl(typeof next.base_url === 'string' ? next.base_url : '')
@@ -348,6 +355,7 @@ function OmniRouteSettings({ rest }) {
               jsx('div',{children:m.label}),jsx('div',{className:'text-xs break-all',children:(m.route_label||m.id)+' · '+m.kind+(m.free_type?' · '+m.free_type:'')+(m.provider_state?' · '+m.provider_state:'')}),
               m.access&&jsx('div',{className:'text-xs',children:metadataLine(m)}),
               jsx('div',{className:'text-xs',children:detailsLine(m)}),
+              m.access_condition&&jsx('div',{className:'text-xs',children:m.access_condition}),
               m.sources&&jsx('div',{className:'text-xs break-all',children:'Fontes: '+m.sources.join(' · ')}),
               m.provider_usage&&jsx('div',{className:'text-xs',children:'Provedor: '+String(m.provider_usage.successes??'—')+'/'+String(m.provider_usage.requests??'—')+' sucessos · '+String(m.provider_usage.avgLatencyMs??'—')+' ms · '+String(m.provider_usage.windowHours??'—')+' h'}),
               ['chat','image','video'].includes(m.kind)&&jsx(Action,{disabled:busy,onClick:()=>setModels(old=>({...old,[m.kind]:m.id})),children:'Usar no campo '+m.kind+' (salvar abaixo)'})

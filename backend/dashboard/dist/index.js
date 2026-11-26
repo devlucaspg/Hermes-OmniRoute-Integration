@@ -2,7 +2,7 @@
   "use strict";
   var SDK = window.__HERMES_PLUGIN_SDK__;
   if (!SDK || !window.__HERMES_PLUGINS__) return;
-  var UI_VERSION = '0.5.0-beta.1';
+  var UI_VERSION = '0.5.0-beta.2';
   // Dashboard's --foreground can be transparent; use the opaque base tokens.
   var SELECT_COLORS = {backgroundColor:'var(--background-base, Canvas)',color:'var(--midground-base, CanvasText)',colorScheme:'light dark'};
   var contextLabel = n => n ? Math.floor(n / 1000).toLocaleString('pt-BR') + ' mil tokens' : 'Sem restrição';
@@ -17,13 +17,20 @@
 const DISCOVERY_TYPES = [['chat','LLM / Chat'],['embedding','Embeddings'],['image','Imagem'],['audio','Áudio'],['video','Vídeo'],['rerank','Reranking'],['moderation','Moderação'],['music','Música']]
 const DISCOVERY_CAPABILITIES = [['tool_calling','Tool calling'],['reasoning','Raciocínio'],['thinking','Thinking'],['vision','Visão'],['structured_output','Saída estruturada'],['attachment','Anexos'],['temperature','Temperatura'],['parallel_tool_calling','Ferramentas em paralelo'],['streaming','Streaming'],['coding','Programação'],['fim','FIM']]
 const ACCESS_TAGS = [['free','Gratuito'],['free_quota','Cota gratuita'],['free_credits','Créditos recorrentes'],['trial_credits','Créditos iniciais'],['free_preview','Preview gratuito'],['subscription','Assinatura'],['paid','Pago'],['local','Local'],['unknown_pricing','Desconhecido']]
-const SOURCES = [['nvidia','NVIDIA NGC'],['openrouter','OpenRouter'],['xkiro','xKiro'],['llm7','LLM7']]
+const SOURCES = [['nvidia','NVIDIA NGC'],['openrouter','OpenRouter'],['xkiro','xKiro'],['llm7','LLM7'],['gemini','Gemini'],['groq','Groq'],['cloudflare-ai','Cloudflare Workers AI'],['sambanova','SambaNova'],['mistral','Mistral Labs']]
 const ADVANCED = [['input_modalities','Entrada',['text','image','audio','video','document']],['output_modalities','Saída',['text','image','audio','video','embedding','rerank']],['lifecycle','Ciclo de vida',['stable','preview','experimental','deprecated','legacy']],['privacy','Privacidade e utilização',['open_weights','open_source','prompt_training','no_prompt_training','commercial_use','development_only']]]
 const PROVIDERS = ['nvidia','openrouter','xkiro','llm7','ollama-local','gemini','groq','mistral','cloudflare-ai','sambanova','nara','github','chatgpt-web','deepseek-web','combo']
 const TAG_LABELS = Object.fromEntries([...ACCESS_TAGS,...DISCOVERY_CAPABILITIES,['text','Texto'],['image','Imagem'],['audio','Áudio'],['video','Vídeo'],['document','Documentos'],['embedding','Embedding'],['rerank','Reranking'],['stable','Estável'],['preview','Preview'],['experimental','Experimental'],['deprecated','Descontinuado'],['legacy','Legado'],['open_weights','Pesos abertos'],['open_source','Código aberto'],['prompt_training','Treina com prompts'],['no_prompt_training','Não treina com prompts'],['commercial_use','Uso comercial'],['development_only','Apenas desenvolvimento']])
 const detailsLine = m => [Number.isFinite(m.context_length)&&'Contexto: '+contextLabel(m.context_length),Number.isFinite(m.parameter_count)&&'Parâmetros: '+m.parameter_count.toLocaleString('pt-BR'),...(m.capabilities||[]).map(t=>TAG_LABELS[t]||t)].filter(Boolean).join(' · ')
 const metadataLine = m => (m.access||[]).map(t=>TAG_LABELS[t]||t).join(' · ')+' | Cota: '+({confirmed:'saldo observado',exhausted:'esgotada',not_applicable:'não aplicável',unknown:'desconhecida'}[m.quota_status]||'desconhecida')+' | Saúde: '+(m.health_status||'unknown')
 const initialDiscovery = () => ({kinds: DISCOVERY_TYPES.map(x=>x[0]), capabilities: [], match:'and', configured_only:true, free_only:false, include_combos:true, min_context:0, q:'', sources:SOURCES.map(x=>x[0]), providers:[], access:[], input_modalities:[], output_modalities:[], lifecycle:[], privacy:[], cache_hours:6, quota_mode:'potential', exclude_cooling:true})
+const restoreDiscovery = saved => {
+  if (!saved || typeof saved !== 'object') return initialDiscovery()
+  const result = {...initialDiscovery(),...saved}
+  const prior = ['nvidia','openrouter','xkiro','llm7']
+  if (Array.isArray(saved.sources) && saved.sources.length===prior.length && prior.every(s=>saved.sources.includes(s))) result.sources=SOURCES.map(x=>x[0])
+  return result
+}
 
   var base = '/api/plugins/omniroute-media';
   function Field(label, input) {
@@ -46,14 +53,14 @@ const initialDiscovery = () => ({kinds: DISCOVERY_TYPES.map(x=>x[0]), capabiliti
     var busy = React.useState(false), loading = busy[0], setLoading = busy[1];
     function refresh() {
       SDK.fetchJSON(base + '/status').then(function (s) {
-        setState(s); setFilters(s.picker_filters?{...initialDiscovery(),...s.picker_filters}:initialDiscovery()); setUrl(s.base_url || ''); setSelections(s.models || {}); setPreferences(s.preferences || {});
+        setState(s); setFilters(restoreDiscovery(s.picker_filters)); setUrl(s.base_url || ''); setSelections(s.models || {}); setPreferences(s.preferences || {});
       }).catch(function(e){setFeedback('Operação OmniRoute falhou. Confira a conexão e as permissões.');});
     }
     React.useEffect(refresh, []);
     function send(path, data, ok) {
       setLoading(true); setFeedback('');
       SDK.fetchJSON(base + path, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)})
-        .then(function(s){setState(s);setFilters(s.picker_filters?{...initialDiscovery(),...s.picker_filters}:initialDiscovery()); setKey(''); setReadToken('');setClearReadToken(false); setDiscovery(null); setPage(0); setFeedback(ok + ' (a Hermes reload may be needed).');})
+        .then(function(s){setState(s);setFilters(restoreDiscovery(s.picker_filters)); setKey(''); setReadToken('');setClearReadToken(false); setDiscovery(null); setPage(0); setFeedback(ok + ' (a Hermes reload may be needed).');})
         .catch(function(e){setFeedback('Operação OmniRoute falhou. Confira a conexão e as permissões.');})
         .finally(function(){setKey('');setReadToken('');setClearReadToken(false);setLoading(false);});
     }
@@ -127,7 +134,7 @@ const initialDiscovery = () => ({kinds: DISCOVERY_TYPES.map(x=>x[0]), capabiliti
             (discovery.warnings||[]).map((w,i)=>h('p',{key:i,className:'text-xs'},String(w))),
             discovery.free_summary&&h('p',{className:'text-xs'},'Catálogo global: '+String(discovery.free_summary.modelCount??'—')+' ofertas; não é saldo da conta.'),
             Object.entries(discovery.source_states||{}).map(([k,v])=>h('p',{key:k,className:'text-xs'},k+': '+v.status+' · '+String(v.count??0)+' registros')),
-            discovery.models.slice(page*50,page*50+50).map(m=>h('div',{key:m.id,className:'border-b py-2'},h('div',null,m.label),h('div',{className:'text-xs break-all'},(m.route_label||m.id)+' · '+m.kind+(m.free_type?' · '+m.free_type:'')+(m.provider_state?' · '+m.provider_state:'')),m.access&&h('div',{className:'text-xs'},metadataLine(m)),h('div',{className:'text-xs'},detailsLine(m)),m.sources&&h('div',{className:'text-xs break-all'},'Fontes: '+m.sources.join(' · ')),m.provider_usage&&h('div',{className:'text-xs'},'Provedor: '+String(m.provider_usage.successes??'—')+'/'+String(m.provider_usage.requests??'—')+' sucessos · '+String(m.provider_usage.avgLatencyMs??'—')+' ms · '+String(m.provider_usage.windowHours??'—')+' h'),['chat','image','video'].includes(m.kind)&&h(C.Button,{disabled:loading,onClick:()=>setSelections(old=>({...old,[m.kind]:m.id}))},'Usar no campo '+m.kind+' (salvar abaixo)'))),
+            discovery.models.slice(page*50,page*50+50).map(m=>h('div',{key:m.id,className:'border-b py-2'},h('div',null,m.label),h('div',{className:'text-xs break-all'},(m.route_label||m.id)+' · '+m.kind+(m.free_type?' · '+m.free_type:'')+(m.provider_state?' · '+m.provider_state:'')),m.access&&h('div',{className:'text-xs'},metadataLine(m)),h('div',{className:'text-xs'},detailsLine(m)),m.access_condition&&h('div',{className:'text-xs'},m.access_condition),m.sources&&h('div',{className:'text-xs break-all'},'Fontes: '+m.sources.join(' · ')),m.provider_usage&&h('div',{className:'text-xs'},'Provedor: '+String(m.provider_usage.successes??'—')+'/'+String(m.provider_usage.requests??'—')+' sucessos · '+String(m.provider_usage.avgLatencyMs??'—')+' ms · '+String(m.provider_usage.windowHours??'—')+' h'),['chat','image','video'].includes(m.kind)&&h(C.Button,{disabled:loading,onClick:()=>setSelections(old=>({...old,[m.kind]:m.id}))},'Usar no campo '+m.kind+' (salvar abaixo)'))),
             h(C.Button,{disabled:page===0||loading,onClick:()=>setPage(p=>p-1)},'Anterior'),
             h(C.Button,{disabled:(page+1)*50>=discovery.models.length||loading,onClick:()=>setPage(p=>p+1)},'Próxima'))
         )

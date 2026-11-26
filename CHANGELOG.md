@@ -1,3 +1,7 @@
+# 0.5.0-beta.2
+
+- Add Gemini, Groq, Cloudflare, SambaNova and Mistral Labs public metadata adapters; access conditions, paid exceptions, exact typed media routes, expired quota windows, and source-filter migration.
+
 # 0.5.0-beta.1
 
 - Experimental provider metadata adapters, explicit access taxonomy, profile-local TTL cache, quota and health filters, and enriched Desktop/Dashboard discovery. See docs/ENRICHED-MODEL-DISCOVERY.md.
