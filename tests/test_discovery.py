@@ -6,6 +6,7 @@ import types
 import unittest
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlsplit
+from urllib import request, error  # preserve stdlib exception identity during module loading
 
 from fastapi import HTTPException
 
@@ -22,8 +23,17 @@ def load_api():
         setattr(modules['hermes_cli.config'], name, lambda *a: {})
     spec = importlib.util.spec_from_file_location('discovery_test_api', ROOT/'backend/dashboard/plugin_api.py')
     mod = importlib.util.module_from_spec(spec)
-    with patch.dict(sys.modules, {**modules, 'discovery_test_api':mod}):
+    replacements = {**modules, 'discovery_test_api': mod}
+    previous = {name: sys.modules.get(name) for name in replacements}
+    try:
+        sys.modules.update(replacements)
         spec.loader.exec_module(mod)
+    finally:
+        for name, value in previous.items():
+            if value is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = value
     return mod
 
 api = load_api()

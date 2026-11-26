@@ -130,3 +130,32 @@ test('no direct network, credential persistence or privileged renderer APIs', ()
     assert.equal(source.includes(unsafe), false, 'unexpected: ' + unsafe);
   }
 });
+
+test('discovery multi-select sends explicit filters and does not activate chat', async () => {
+  const c = build({ backend: {'/status': status, '/discover-models': {models:[{id:'p/llm',label:'Example',kind:'chat'}],warnings:[]}} });
+  c.render(); c.effects()[0](); await tick();
+  let nodes = c.flatten(c.render());
+  function toggle(label, checked) {
+    const node = c.flatten(c.render()).find(n => n.type==='label' && Array.isArray(n.props.children) && n.props.children.includes(label));
+    assert.ok(node, label);
+    node.props.children.find(n=>n?.type==='input').props.onChange({target:{checked}});
+  }
+  toggle('Todos os tipos', false);
+  assert.equal(c.flatten(c.render()).find(n=>n.type==='button'&&n.props.children==='Consultar catálogo').props.disabled,true);
+  toggle('LLM / Chat', true);
+  toggle('Embeddings', true);
+  toggle('Tool calling', true);
+  toggle('Visão', true);
+  nodes = c.flatten(c.render());
+  const mode = nodes.find(n=>n.type==='select'&&n.props.value==='and');
+  mode.props.onChange({target:{value:'or'}});
+  c.flatten(c.render()).find(n=>n.type==='button'&&n.props.children==='Consultar catálogo').props.onClick();
+  await tick();
+  const call = c.calls.at(-1);
+  assert.equal(call.endpoint,'/discover-models');
+  assert.equal(JSON.stringify(call.options.body.kinds),JSON.stringify(['chat','embedding']));
+  assert.equal(JSON.stringify(call.options.body.capabilities),JSON.stringify(['tool_calling','vision']));
+  assert.equal(call.options.body.match,'or');
+  assert.equal(c.calls.some(x=>x.endpoint==='/activate-chat'),false);
+  assert.ok(JSON.stringify(c.render()).includes('p/llm'));
+});

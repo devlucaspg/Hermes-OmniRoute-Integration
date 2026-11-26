@@ -101,6 +101,8 @@ function OmniRouteSettings({ rest }) {
   function incorporateStatus(next) {
     if (!next || typeof next !== 'object') throw new Error('Invalid server status')
     setState(next)
+    setDiscovery(null)
+    setPage(0)
     setUrl(typeof next.base_url === 'string' ? next.base_url : '')
     setModels(next.models && typeof next.models === 'object' ? next.models : {})
     setPreferences(next.preferences && typeof next.preferences === 'object' ? next.preferences : {})

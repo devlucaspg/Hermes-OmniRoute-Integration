@@ -41,9 +41,9 @@ const initialDiscovery = () => ({kinds: DISCOVERY_TYPES.map(x=>x[0]), capabiliti
     function send(path, data, ok) {
       setLoading(true); setFeedback('');
       SDK.fetchJSON(base + path, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)})
-        .then(function(s){setState(s); setKey(''); setReadToken(''); setFeedback(ok + ' (a Hermes reload may be needed).');})
+        .then(function(s){setState(s); setKey(''); setReadToken(''); setDiscovery(null); setPage(0); setFeedback(ok + ' (a Hermes reload may be needed).');})
         .catch(function(e){setFeedback(String(e.message || e));})
-        .finally(function(){setLoading(false);});
+        .finally(function(){setKey('');setReadToken('');setLoading(false);});
     }
     function showModels(kind) {
       SDK.fetchJSON(base + '/models?kind=' + encodeURIComponent(kind))
