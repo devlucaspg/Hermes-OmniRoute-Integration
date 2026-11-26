@@ -10,7 +10,7 @@ import { useEffect, useState } from 'react'
 import { jsx, jsxs } from 'react/jsx-runtime'
 import * as sdk from '@hermes/plugin-sdk'
 
-const UI_VERSION = '0.5.0-beta.2'
+const UI_VERSION = '0.5.0-beta.3'
 
 // The host declares color-scheme: light even for custom dark palettes.
 // Explicit opaque foreground AND background prevent pale text on the
@@ -41,7 +41,7 @@ const PROVIDERS = ['nvidia','openrouter','xkiro','llm7','ollama-local','gemini',
 const TAG_LABELS = Object.fromEntries([...ACCESS_TAGS,...DISCOVERY_CAPABILITIES,['text','Texto'],['image','Imagem'],['audio','Áudio'],['video','Vídeo'],['document','Documentos'],['embedding','Embedding'],['rerank','Reranking'],['stable','Estável'],['preview','Preview'],['experimental','Experimental'],['deprecated','Descontinuado'],['legacy','Legado'],['open_weights','Pesos abertos'],['open_source','Código aberto'],['prompt_training','Treina com prompts'],['no_prompt_training','Não treina com prompts'],['commercial_use','Uso comercial'],['development_only','Apenas desenvolvimento']])
 const detailsLine = m => [Number.isFinite(m.context_length)&&'Contexto: '+contextLabel(m.context_length),Number.isFinite(m.parameter_count)&&'Parâmetros: '+m.parameter_count.toLocaleString('pt-BR'),...(m.capabilities||[]).map(t=>TAG_LABELS[t]||t)].filter(Boolean).join(' · ')
 const metadataLine = m => (m.access||[]).map(t=>TAG_LABELS[t]||t).join(' · ')+' | Cota: '+({confirmed:'saldo observado',exhausted:'esgotada',not_applicable:'não aplicável',unknown:'desconhecida'}[m.quota_status]||'desconhecida')+' | Saúde: '+(m.health_status||'unknown')
-const initialDiscovery = () => ({kinds: DISCOVERY_TYPES.map(x=>x[0]), capabilities: [], match:'and', configured_only:true, free_only:false, include_combos:true, min_context:0, q:'', sources:SOURCES.map(x=>x[0]), providers:[], access:[], input_modalities:[], output_modalities:[], lifecycle:[], privacy:[], cache_hours:6, quota_mode:'potential', exclude_cooling:true})
+const initialDiscovery = () => ({kinds: DISCOVERY_TYPES.map(x=>x[0]), capabilities: [], match:'and', configured_only:true, free_only:false, include_combos:true, min_context:0, q:'', sources:SOURCES.map(x=>x[0]), providers:[], pinned_providers:[], access:[], input_modalities:[], output_modalities:[], lifecycle:[], privacy:[], cache_hours:6, quota_mode:'potential', exclude_cooling:true})
 const restoreDiscovery = saved => {
   if (!saved || typeof saved !== 'object') return initialDiscovery()
   const result = {...initialDiscovery(),...saved}
@@ -131,6 +131,9 @@ function OmniRouteSettings({ rest }) {
   const [clearReadToken, setClearReadToken] = useState(false)
   const [filters, setFilters] = useState(initialDiscovery())
   const [discovery, setDiscovery] = useState(null)
+  const [configuredProviders, setConfiguredProviders] = useState(null)
+  const [providersLoading, setProvidersLoading] = useState(false)
+  const [providerError, setProviderError] = useState('')
   const [page, setPage] = useState(0)
   const [models, setModels] = useState({})
   const [preferences, setPreferences] = useState({})
@@ -241,8 +244,22 @@ function OmniRouteSettings({ rest }) {
       jsx('input', {type:'checkbox', checked, disabled:busy, onChange:e=>onChange(e.target.checked)}), label
     ]}, label)
   }
+  async function loadConfiguredProviders() {
+    if (providersLoading || busy) return
+    setProvidersLoading(true); setProviderError('')
+    try {
+      const result = await rest('/configured-providers')
+      if (!Array.isArray(result?.providers)) throw new Error('Invalid provider catalog')
+      setConfiguredProviders(result.providers.filter(p=>p && typeof p.id==='string' && Number.isInteger(p.model_count)))
+    } catch (e) { setProviderError(errorText(e)) }
+    finally { setProvidersLoading(false) }
+  }
+  useEffect(() => {
+    setConfiguredProviders(null)
+    if (state?.api_key_configured) loadConfiguredProviders()
+  }, [rest, state?.base_url, state?.api_key_configured])
   async function discoverAll() {
-    if (busy || !filters.kinds.length) return
+    if (busy || (!filters.kinds.length && !filters.pinned_providers.length)) return
     setBusy(true); setDiscovery(null); setPage(0); setFeedback('')
     try {
       const result = await rest('/discover-models', {method:'POST', body:{...filters,apply_to_picker:true}})
@@ -319,6 +336,16 @@ function OmniRouteSettings({ rest }) {
         children:jsxs('div',{className:'space-y-2',children:[
           jsx(Field,{label:'Pesquisa',children:jsx(TextField,{value:filters.q,maxLength:200,disabled:busy,onChange:e=>updateFilter('q',e.target.value)})}),
           ...[['configured_only','Somente configurados'],['free_only','Somente ofertas gratuitas ou locais'],['include_combos','Incluir Combos e Auto-Combos']].map(([k,l])=>checkbox(l,filters[k],v=>updateFilter(k,v))),
+          jsx(Title,{children:'Provedores fixos (somar à pesquisa)'}),
+          jsx('p',{className:'text-xs',children:'Inclui todos os modelos autorizados dos provedores selecionados, independentemente de gratuidade, tipo, capacidades, texto, contexto, cotas ou bloqueios. Podem existir modelos pagos.'}),
+          jsx(Action,{disabled:busy||providersLoading||!configured,onClick:loadConfiguredProviders,children:providersLoading?'Consultando provedores…':'Consultar provedores configurados'}),
+          providerError&&jsx('p',{className:'text-xs',children:providerError}),
+          configuredProviders&&jsx('p',{className:'text-xs',children:configuredProviders.length+' provedor(es) com modelos autorizados'}),
+          jsx('div',{className:'grid grid-cols-2 gap-1',children:[...new Set([...(configuredProviders||[]).map(p=>p.id),...filters.pinned_providers])].map(k=>{
+            const provider=configuredProviders?.find(p=>p.id===k)
+            return checkbox('Fixo: '+k+(provider?' ('+provider.model_count+')':' (salvo)'),filters.pinned_providers.includes(k),v=>toggleFilter('pinned_providers',k,v))
+          })}),
+          jsx(Action,{disabled:busy||!filters.pinned_providers.length,onClick:()=>updateFilter('pinned_providers',[]),children:'Limpar provedores fixos'}),
           jsx(Title,{children:'Modalidade de acesso'}),
           jsx('div',{className:'grid grid-cols-2 gap-1',children:ACCESS_TAGS.map(([k,l])=>checkbox(l,filters.access.includes(k),v=>toggleFilter('access',k,v)))}),
           jsxs('details',{children:[jsx('summary',{children:'Provedores e fontes de descoberta'}),jsxs('div',{className:'space-y-2',children:[
@@ -341,18 +368,19 @@ function OmniRouteSettings({ rest }) {
           jsxs('details',{children:[jsx('summary',{children:'Filtros avançados'}),...ADVANCED.map(([name,label,items])=>jsxs('div',{children:[jsx(Title,{children:label}),jsx('div',{className:'grid grid-cols-2 gap-1',children:items.map(k=>checkbox(TAG_LABELS[k]||k,filters[name].includes(k),v=>toggleFilter(name,k,v)))})]},name))]}),
           jsx(Field,{label:'Cotas',children:jsx('select',{style:SELECT_STYLE,value:filters.quota_mode,onChange:e=>updateFilter('quota_mode',e.target.value),children:[['all','Não verificar'],['potential','Excluir esgotadas conhecidas'],['confirmed','Saldo observado ou local']].map(([k,l])=>jsx('option',{style:SELECT_COLORS,value:k,children:l},k))})}),
           checkbox('Excluir bloqueios temporários observados',filters.exclude_cooling,v=>updateFilter('exclude_cooling',v)),
-          jsx(Action,{disabled:busy||!filters.kinds.length,onClick:discoverAll,children:'Consultar catálogo'}),
+          jsx(Action,{disabled:busy||(!filters.kinds.length&&!filters.pinned_providers.length),onClick:discoverAll,children:'Consultar catálogo'}),
           jsx('p',{className:'text-xs',children:'A consulta bem-sucedida aplica automaticamente os modelos de chat ao seletor da conversa. Use Atualizar modelos no seletor para recarregar a lista.'}),
           Number.isInteger(state?.picker_count)&&jsx('p',{className:'text-xs',children:'Catálogo aplicado: '+state.picker_count+' modelo(s) de chat.'}),
-          jsx(Action,{disabled:busy,onClick:()=>{setFilters(initialDiscovery());setDiscovery(null);setPage(0)},children:'Restaurar filtros'}),
-          !filters.kinds.length&&jsx('p',{children:'Nenhum tipo selecionado.'}),
+          jsx(Action,{disabled:busy,onClick:()=>{setFilters(old=>({...initialDiscovery(),pinned_providers:old.pinned_providers}));setDiscovery(null);setPage(0)},children:'Restaurar filtros'}),
+          !filters.kinds.length&&jsx('p',{children:filters.pinned_providers.length?'Somente provedores fixos.':'Nenhum tipo selecionado.'}),
           discovery&&jsxs('div',{children:[
             jsx('p',{children:discovery.models.length+' modelo(s) encontrados'}),
+            Number.isInteger(discovery.search_count)&&jsx('p',{className:'text-xs',children:discovery.search_count+' pela pesquisa + '+discovery.pinned_added_count+' adicionais dos provedores fixos ('+discovery.pinned_count+' fixos no total).'}),
             ...(discovery.warnings||[]).map((w,i)=>jsx('p',{className:'text-xs',children:String(w)},i)),
             discovery.free_summary&&jsx('p',{className:'text-xs',children:'Catálogo global: '+String(discovery.free_summary.modelCount??'—')+' ofertas; não é saldo da conta.'}),
             ...Object.entries(discovery.source_states||{}).map(([k,v])=>jsx('p',{className:'text-xs',children:k+': '+v.status+' · '+String(v.count??0)+' registros'},k)),
             ...discovery.models.slice(page*50,page*50+50).map(m=>jsxs('div',{className:'border-b py-2',children:[
-              jsx('div',{children:m.label}),jsx('div',{className:'text-xs break-all',children:(m.route_label||m.id)+' · '+m.kind+(m.free_type?' · '+m.free_type:'')+(m.provider_state?' · '+m.provider_state:'')}),
+              jsx('div',{children:m.label}),m.pinned&&jsx('div',{className:'text-xs font-semibold',children:m.matched_search?'Provedor fixo · também encontrado na pesquisa':'Provedor fixo · fora dos filtros'}),jsx('div',{className:'text-xs break-all',children:(m.route_label||m.id)+' · '+m.kind+(m.free_type?' · '+m.free_type:'')+(m.provider_state?' · '+m.provider_state:'')}),
               m.access&&jsx('div',{className:'text-xs',children:metadataLine(m)}),
               jsx('div',{className:'text-xs',children:detailsLine(m)}),
               m.access_condition&&jsx('div',{className:'text-xs',children:m.access_condition}),

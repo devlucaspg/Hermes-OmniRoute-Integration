@@ -245,7 +245,7 @@ test('Desktop footer identifies its own version independently of remote backend'
   const footer=c.flatten(c.render()).find(n=>n.type==='footer');
   assert.ok(footer);
   const content=JSON.stringify(footer);
-  assert.ok(content.includes('Interface Desktop v0.5.0-beta.2'));
+  assert.ok(content.includes('Interface Desktop v0.5.0-beta.3'));
   assert.ok(content.includes('Backend conectado: v0.4.0-beta.2'));
   assert.ok(content.includes('Versões diferentes'));
 });
@@ -317,4 +317,22 @@ test('legacy full source selection migrates; explicit opt-outs remain intact', a
   d.render();d.effects()[0]();await tick();
   d.flatten(d.render()).find(n=>n.type==='button'&&n.props.children==='Consultar catálogo').props.onClick();await tick();
   assert.equal(JSON.stringify(d.calls.at(-1).options.body.sources),JSON.stringify(['nvidia']));
+});
+
+test('configured provider selection is independent, multi-select and persists when restoring search filters', async () => {
+  const c=build({backend:{'/status':status,'/configured-providers':{providers:[{id:'chatgpt-web',model_count:26},{id:'deepseek-web',model_count:14}]},'/discover-models':{models:[{id:'chatgpt-web/test',label:'Web',kind:'chat',pinned:true,matched_search:false}],warnings:[],search_count:0,pinned_count:1,pinned_added_count:1}}});
+  c.render();c.effects()[0]();await tick();
+  const button=label=>c.flatten(c.render()).find(n=>n.type==='button'&&n.props.children===label);
+  button('Consultar provedores configurados').props.onClick();await tick();
+  function toggle(label,checked){const n=c.flatten(c.render()).find(n=>n.type==='label'&&Array.isArray(n.props.children)&&n.props.children.includes(label));assert.ok(n,label);n.props.children.find(x=>x?.type==='input').props.onChange({target:{checked}});}
+  toggle('Fixo: chatgpt-web (26)',true);toggle('Fixo: deepseek-web (14)',true);
+  button('Restaurar filtros').props.onClick();
+  toggle('Todos os tipos',false);
+  assert.equal(button('Consultar catálogo').props.disabled,false);
+  button('Consultar catálogo').props.onClick();await tick();
+  assert.equal(JSON.stringify(c.calls.at(-1).options.body.pinned_providers),JSON.stringify(['chatgpt-web','deepseek-web']));
+  assert.equal(JSON.stringify(c.calls.at(-1).options.body.kinds),'[]');
+  assert.ok(JSON.stringify(c.render()).includes('Provedor fixo · fora dos filtros'));
+  button('Limpar provedores fixos').props.onClick();
+  assert.equal(button('Consultar catálogo').props.disabled,true);
 });

@@ -1,4 +1,4 @@
-# Enriched discovery — 0.5.0-beta.2
+# Enriched discovery — 0.5.0-beta.3
 
 Experimental branch; do not install in production without verification. All inference
 remains on OmniRoute. Public catalogs only supplement exact authorized canonical
@@ -30,3 +30,7 @@ routing IDs (owner + "/" + root). No upstream credentials are requested or forwa
   Previously saved full four-source selections migrate to the nine-source default; narrower selections are preserved.
 - Provider source toggles are per query and saved with the last successful picker
   selection. No background worker or extra CT. Native refresh reloads last applied IDs.
+
+## Fixed providers
+
+Select any configured provider exposed to the current inference key via `GET /configured-providers`. `pinned_providers` is independent of every normal search filter, including model kind, pricing, health, quotas, context and text. The server always requests a configured-only authorized catalog and excludes combos from fixed provider selection. Results are an exact-ID union with `matched_search` and `pinned` flags, `search_count`, `pinned_count` and `pinned_added_count`. A fixed provider is not assumed free; paid or blocked models may be included, without invoking inference. Only chat models reach the conversation picker. Pins persist in the profile's last successful picker selection; restoring normal filters preserves them. Clearing pins removes them on the next successful consultation. No access policy is bypassed.

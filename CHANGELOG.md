@@ -1,3 +1,7 @@
+# 0.5.0-beta.3
+
+- Independent configured-provider selection: query authorized catalog dynamically, union selected providers with search results, preserve true access tags, deduplicate exact IDs, persist with picker filters and distinguish pinned-only results.
+
 # 0.5.0-beta.2
 
 - Add Gemini, Groq, Cloudflare, SambaNova and Mistral Labs public metadata adapters; access conditions, paid exceptions, exact typed media routes, expired quota windows, and source-filter migration.

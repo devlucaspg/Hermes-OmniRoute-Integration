@@ -2,7 +2,7 @@
   "use strict";
   var SDK = window.__HERMES_PLUGIN_SDK__;
   if (!SDK || !window.__HERMES_PLUGINS__) return;
-  var UI_VERSION = '0.5.0-beta.2';
+  var UI_VERSION = '0.5.0-beta.3';
   // Dashboard's --foreground can be transparent; use the opaque base tokens.
   var SELECT_COLORS = {backgroundColor:'var(--background-base, Canvas)',color:'var(--midground-base, CanvasText)',colorScheme:'light dark'};
   var contextLabel = n => n ? Math.floor(n / 1000).toLocaleString('pt-BR') + ' mil tokens' : 'Sem restrição';
@@ -23,7 +23,7 @@ const PROVIDERS = ['nvidia','openrouter','xkiro','llm7','ollama-local','gemini',
 const TAG_LABELS = Object.fromEntries([...ACCESS_TAGS,...DISCOVERY_CAPABILITIES,['text','Texto'],['image','Imagem'],['audio','Áudio'],['video','Vídeo'],['document','Documentos'],['embedding','Embedding'],['rerank','Reranking'],['stable','Estável'],['preview','Preview'],['experimental','Experimental'],['deprecated','Descontinuado'],['legacy','Legado'],['open_weights','Pesos abertos'],['open_source','Código aberto'],['prompt_training','Treina com prompts'],['no_prompt_training','Não treina com prompts'],['commercial_use','Uso comercial'],['development_only','Apenas desenvolvimento']])
 const detailsLine = m => [Number.isFinite(m.context_length)&&'Contexto: '+contextLabel(m.context_length),Number.isFinite(m.parameter_count)&&'Parâmetros: '+m.parameter_count.toLocaleString('pt-BR'),...(m.capabilities||[]).map(t=>TAG_LABELS[t]||t)].filter(Boolean).join(' · ')
 const metadataLine = m => (m.access||[]).map(t=>TAG_LABELS[t]||t).join(' · ')+' | Cota: '+({confirmed:'saldo observado',exhausted:'esgotada',not_applicable:'não aplicável',unknown:'desconhecida'}[m.quota_status]||'desconhecida')+' | Saúde: '+(m.health_status||'unknown')
-const initialDiscovery = () => ({kinds: DISCOVERY_TYPES.map(x=>x[0]), capabilities: [], match:'and', configured_only:true, free_only:false, include_combos:true, min_context:0, q:'', sources:SOURCES.map(x=>x[0]), providers:[], access:[], input_modalities:[], output_modalities:[], lifecycle:[], privacy:[], cache_hours:6, quota_mode:'potential', exclude_cooling:true})
+const initialDiscovery = () => ({kinds: DISCOVERY_TYPES.map(x=>x[0]), capabilities: [], match:'and', configured_only:true, free_only:false, include_combos:true, min_context:0, q:'', sources:SOURCES.map(x=>x[0]), providers:[], pinned_providers:[], access:[], input_modalities:[], output_modalities:[], lifecycle:[], privacy:[], cache_hours:6, quota_mode:'potential', exclude_cooling:true})
 const restoreDiscovery = saved => {
   if (!saved || typeof saved !== 'object') return initialDiscovery()
   const result = {...initialDiscovery(),...saved}
@@ -40,6 +40,9 @@ const restoreDiscovery = saved => {
   function Panel() {
     var [filters,setFilters]=React.useState(initialDiscovery());
     var [discovery,setDiscovery]=React.useState(null);
+    var [configuredProviders,setConfiguredProviders]=React.useState(null);
+    var [providersLoading,setProvidersLoading]=React.useState(false);
+    var [providerError,setProviderError]=React.useState('');
     var [page,setPage]=React.useState(0);
     var [readToken,setReadToken]=React.useState('');
     var [clearReadToken,setClearReadToken]=React.useState(false);
@@ -80,8 +83,17 @@ const restoreDiscovery = saved => {
     function updateFilter(name,value){setFilters(old=>({...old,[name]:value}));setDiscovery(null);setPage(0);}
     function toggleFilter(name,value,checked){updateFilter(name,checked?[...new Set([...filters[name],value])]:filters[name].filter(x=>x!==value));}
     function check(label,checked,change){return h('label',{key:label,className:'flex gap-2 items-center text-sm'},h('input',{type:'checkbox',checked,disabled:loading,onChange:e=>change(e.target.checked)}),label);}
+    function loadConfiguredProviders(){
+      if(providersLoading||loading)return;
+      setProvidersLoading(true);setProviderError('');
+      SDK.fetchJSON(base+'/configured-providers')
+        .then(r=>{if(!Array.isArray(r?.providers))throw Error('Invalid provider catalog');setConfiguredProviders(r.providers.filter(p=>p&&typeof p.id==='string'&&Number.isInteger(p.model_count)));})
+        .catch(()=>setProviderError('Não foi possível consultar os provedores configurados.'))
+        .finally(()=>setProvidersLoading(false));
+    }
+    React.useEffect(()=>{setConfiguredProviders(null);if(state?.api_key_configured)loadConfiguredProviders();},[state?.base_url,state?.api_key_configured]);
     function discoverAll(){
-      if(loading||!filters.kinds.length)return;
+      if(loading||(!filters.kinds.length&&!filters.pinned_providers.length))return;
       setLoading(true);setDiscovery(null);setPage(0);setFeedback('');
       SDK.fetchJSON(base+'/discover-models',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...filters,apply_to_picker:true})})
         .then(r=>{if(!r||!Array.isArray(r.models))throw Error('Invalid catalog');setDiscovery(r);if(Number.isInteger(r.picker_count)){setState(old=>({...old,picker_count:r.picker_count,picker_filters:r.picker_filters}));setFeedback(r.picker_count+' modelo(s) de chat aplicados. Use Atualizar modelos no seletor da conversa.');}})
@@ -106,6 +118,16 @@ const restoreDiscovery = saved => {
         h(C.CardContent,null,
           Field('Pesquisa',h(C.Input,{value:filters.q,maxLength:200,disabled:loading,onChange:e=>updateFilter('q',e.target.value)})),
           ...[['configured_only','Somente configurados'],['free_only','Somente ofertas gratuitas ou locais'],['include_combos','Incluir Combos e Auto-Combos']].map(([k,l])=>check(l,filters[k],v=>updateFilter(k,v))),
+          h('h3',null,'Provedores fixos (somar à pesquisa)'),
+          h('p',{className:'text-xs'},'Inclui todos os modelos autorizados dos provedores selecionados, independentemente de gratuidade, tipo, capacidades, texto, contexto, cotas ou bloqueios. Podem existir modelos pagos.'),
+          h(C.Button,{disabled:loading||providersLoading||!state?.api_key_configured,onClick:loadConfiguredProviders},providersLoading?'Consultando provedores…':'Consultar provedores configurados'),
+          providerError&&h('p',{className:'text-xs'},providerError),
+          configuredProviders&&h('p',{className:'text-xs'},configuredProviders.length+' provedor(es) com modelos autorizados'),
+          h('div',{className:'grid grid-cols-2 gap-1'},[...new Set([...(configuredProviders||[]).map(p=>p.id),...filters.pinned_providers])].map(k=>{
+            const provider=configuredProviders?.find(p=>p.id===k);
+            return check('Fixo: '+k+(provider?' ('+provider.model_count+')':' (salvo)'),filters.pinned_providers.includes(k),v=>toggleFilter('pinned_providers',k,v));
+          })),
+          h(C.Button,{disabled:loading||!filters.pinned_providers.length,onClick:()=>updateFilter('pinned_providers',[])},'Limpar provedores fixos'),
           h('h3',null,'Modalidade de acesso'),
           h('div',{className:'grid grid-cols-2 gap-1'},ACCESS_TAGS.map(([k,l])=>check(l,filters.access.includes(k),v=>toggleFilter('access',k,v)))),
           h('details',null,h('summary',null,'Provedores e fontes de descoberta'),
@@ -125,16 +147,16 @@ const restoreDiscovery = saved => {
           h('details',null,h('summary',null,'Filtros avançados'),ADVANCED.map(([name,label,items])=>h('div',{key:name},h('h3',null,label),h('div',{className:'grid grid-cols-2 gap-1'},items.map(k=>check(TAG_LABELS[k]||k,filters[name].includes(k),v=>toggleFilter(name,k,v))))))),
           Field('Cotas',h('select',{style:SELECT_COLORS,value:filters.quota_mode,onChange:e=>updateFilter('quota_mode',e.target.value)},[['all','Não verificar'],['potential','Excluir esgotadas conhecidas'],['confirmed','Saldo observado ou local']].map(([k,l])=>h('option',{style:SELECT_COLORS,value:k,key:k},l)))),
           check('Excluir bloqueios temporários observados',filters.exclude_cooling,v=>updateFilter('exclude_cooling',v)),
-          h(C.Button,{disabled:loading||!filters.kinds.length,onClick:discoverAll},'Consultar catálogo'),
+          h(C.Button,{disabled:loading||(!filters.kinds.length&&!filters.pinned_providers.length),onClick:discoverAll},'Consultar catálogo'),
           h('p',{className:'text-xs'},'A consulta bem-sucedida aplica os modelos de chat ao seletor da conversa. Use Atualizar modelos no seletor.'),
           Number.isInteger(state?.picker_count)&&h('p',{className:'text-xs'},'Catálogo aplicado: '+state.picker_count+' modelo(s) de chat.'),
-          h(C.Button,{disabled:loading,onClick:()=>{setFilters(initialDiscovery());setDiscovery(null);setPage(0);}},'Restaurar filtros'),
-          !filters.kinds.length&&h('p',null,'Nenhum tipo selecionado.'),
-          discovery&&h('div',null,h('p',null,discovery.models.length+' modelo(s) encontrados'),
+          h(C.Button,{disabled:loading,onClick:()=>{setFilters(old=>({...initialDiscovery(),pinned_providers:old.pinned_providers}));setDiscovery(null);setPage(0);}},'Restaurar filtros'),
+          !filters.kinds.length&&h('p',null,filters.pinned_providers.length?'Somente provedores fixos.':'Nenhum tipo selecionado.'),
+          discovery&&h('div',null,h('p',null,discovery.models.length+' modelo(s) encontrados'),Number.isInteger(discovery.search_count)&&h('p',{className:'text-xs'},discovery.search_count+' pela pesquisa + '+discovery.pinned_added_count+' adicionais dos provedores fixos ('+discovery.pinned_count+' fixos no total).'),
             (discovery.warnings||[]).map((w,i)=>h('p',{key:i,className:'text-xs'},String(w))),
             discovery.free_summary&&h('p',{className:'text-xs'},'Catálogo global: '+String(discovery.free_summary.modelCount??'—')+' ofertas; não é saldo da conta.'),
             Object.entries(discovery.source_states||{}).map(([k,v])=>h('p',{key:k,className:'text-xs'},k+': '+v.status+' · '+String(v.count??0)+' registros')),
-            discovery.models.slice(page*50,page*50+50).map(m=>h('div',{key:m.id,className:'border-b py-2'},h('div',null,m.label),h('div',{className:'text-xs break-all'},(m.route_label||m.id)+' · '+m.kind+(m.free_type?' · '+m.free_type:'')+(m.provider_state?' · '+m.provider_state:'')),m.access&&h('div',{className:'text-xs'},metadataLine(m)),h('div',{className:'text-xs'},detailsLine(m)),m.access_condition&&h('div',{className:'text-xs'},m.access_condition),m.sources&&h('div',{className:'text-xs break-all'},'Fontes: '+m.sources.join(' · ')),m.provider_usage&&h('div',{className:'text-xs'},'Provedor: '+String(m.provider_usage.successes??'—')+'/'+String(m.provider_usage.requests??'—')+' sucessos · '+String(m.provider_usage.avgLatencyMs??'—')+' ms · '+String(m.provider_usage.windowHours??'—')+' h'),['chat','image','video'].includes(m.kind)&&h(C.Button,{disabled:loading,onClick:()=>setSelections(old=>({...old,[m.kind]:m.id}))},'Usar no campo '+m.kind+' (salvar abaixo)'))),
+            discovery.models.slice(page*50,page*50+50).map(m=>h('div',{key:m.id,className:'border-b py-2'},h('div',null,m.label),m.pinned&&h('div',{className:'text-xs font-semibold'},m.matched_search?'Provedor fixo · também encontrado na pesquisa':'Provedor fixo · fora dos filtros'),h('div',{className:'text-xs break-all'},(m.route_label||m.id)+' · '+m.kind+(m.free_type?' · '+m.free_type:'')+(m.provider_state?' · '+m.provider_state:'')),m.access&&h('div',{className:'text-xs'},metadataLine(m)),h('div',{className:'text-xs'},detailsLine(m)),m.access_condition&&h('div',{className:'text-xs'},m.access_condition),m.sources&&h('div',{className:'text-xs break-all'},'Fontes: '+m.sources.join(' · ')),m.provider_usage&&h('div',{className:'text-xs'},'Provedor: '+String(m.provider_usage.successes??'—')+'/'+String(m.provider_usage.requests??'—')+' sucessos · '+String(m.provider_usage.avgLatencyMs??'—')+' ms · '+String(m.provider_usage.windowHours??'—')+' h'),['chat','image','video'].includes(m.kind)&&h(C.Button,{disabled:loading,onClick:()=>setSelections(old=>({...old,[m.kind]:m.id}))},'Usar no campo '+m.kind+' (salvar abaixo)'))),
             h(C.Button,{disabled:page===0||loading,onClick:()=>setPage(p=>p-1)},'Anterior'),
             h(C.Button,{disabled:(page+1)*50>=discovery.models.length||loading,onClick:()=>setPage(p=>p+1)},'Próxima'))
         )
