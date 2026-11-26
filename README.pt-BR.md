@@ -1,6 +1,6 @@
 # OmniRoute para Hermes — integração da comunidade
 
-**Versão candidata:** `0.4.0-beta.1`. Este projeto ainda não foi submetido nem aceito pelo Marketplace oficial do Hermes.
+**Versão candidata:** `0.4.0-beta.2`. Este projeto ainda não foi submetido nem aceito pelo Marketplace oficial do Hermes.
 
 [English README](README.md) · [Guia detalhado da interface Desktop](docs/DESKTOP.md)
 
@@ -13,7 +13,7 @@ Integração independente que conecta o [Hermes Agent](https://github.com/NousRe
 | Função | Componente | Endpoint | Observações |
 | --- | --- | --- | --- |
 | Chat com LLM, ferramentas, streaming e modelos com visão | `model-provider/` | `POST /chat/completions` | Transporte nativo do Hermes; utiliza `model.provider=omniroute` |
-| Descoberta dinâmica de modelos de chat | `model-provider/` | `GET /models?kind=chat&prefix=alias` | Exclui modelos tipados de mídia/embeddings; não inventa IDs |
+| Descoberta dinâmica de modelos de chat | `model-provider/` | `GET /models?prefix=alias&limit=200` | Exclui modelos tipados de mídia/embeddings; não inventa IDs |
 | Geração de imagens | `backend/` | `POST /images/generations` | Só informa tamanho se houver dimensões compatíveis |
 | Edição de imagens e referências | `backend/` | `POST /images/edits` | Limites de referências dependentes do modelo; download seguro pelo Hermes |
 | Geração de vídeos | `backend/` | `GET/POST /videos/generations` | Catálogo especializado e metadados por modelo |
@@ -59,7 +59,7 @@ Você pode instalar **diretamente do GitHub, sem clonar o repositório e sem usa
 
 **Atenção ao local da instalação:** no Hermes Desktop nativo, a interface JavaScript deve estar instalada na máquina que executa o aplicativo. No **Hermes Webapp hospedado no servidor**, os plugins de interface são carregados no host que serve o Webapp. Instalar o backend remoto não garante, por si só, que a interface apareça em um aplicativo Desktop de outra máquina.
 
-A origem do Git é a branch padrão `main`, atualmente com a v0.4.0-beta.1. Caso precise de reprodução exata, fixe uma referência/commit suportado pela sua versão do Hermes. Revise a fonte antes de autorizar código de terceiros.
+A origem do Git é a branch padrão `main`, atualmente com a v0.4.0-beta.2. Caso precise de reprodução exata, fixe uma referência/commit suportado pela sua versão do Hermes. Revise a fonte antes de autorizar código de terceiros.
 
 ## Instalação pelo terminal (alternativa)
 
@@ -136,9 +136,10 @@ Guia de instalação, diagnóstico, segurança e reversão: [docs/DESKTOP.md](do
 
 ## Compatibilidade com OmniRoute 3.8.53
 
-A implementação `0.4.0-beta.1` foi alinhada aos contratos do OmniRoute **3.8.53**:
+A implementação `0.4.0-beta.2` foi alinhada aos contratos do OmniRoute **3.8.53**:
 
-- Chat usa `GET /v1/models?kind=chat&prefix=alias` e exclui entradas tipadas de imagem, vídeo, áudio e embeddings do seletor LLM.
+- Chat consulta o catálogo unificado autorizado pela chave, com `GET /v1/models?prefix=alias&limit=200` e cursores `after` até o fim. A classificação local preserva combos e subtipos válidos de chat; modelos especializados continuam separados. O painel não corta mais a lista em 1.000 modelos. Respostas grandes reduzem o tamanho da página; falhas de paginação não são apresentadas como sucesso parcial. O provedor nativo registra o hook `picker_catalog` do Hermes e a variável de endpoint, sem persistir segredos globalmente.
+- O Hermes Desktop mostra inicialmente 50 famílias por provedor; busca e visibilidade são controles do próprio Hermes. Use **Refresh models** após alterações no catálogo. O cache de mídia do plugin guarda apenas resultados bem-sucedidos por 60 segundos, isolados por endpoint e impressão digital da chave.
 - Áudio usa `type: audio` com `subtype: speech` para TTS ou `subtype: transcription` para STT.
 - Imagens não recebem `size` arbitrário; dimensões explícitas em pixels são aceitas quando compatíveis.
 - Edição envia imagens como data URLs base64 em JSON e verifica limites conhecidos de referências por modelo.

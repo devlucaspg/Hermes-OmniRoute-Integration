@@ -1,4 +1,6 @@
-# OmniRoute no Hermes Desktop — 0.4.0-beta.1
+# OmniRoute no Hermes Desktop — 0.4.0-beta.2
+
+> A correção de descoberta de catálogo da beta.2 é executada no backend Hermes. O ZIP e o checksum da beta.1 abaixo são históricos; para testar a beta.2 use o checkout Git correspondente e o instalador local. Um novo ZIP não foi publicado nesta alteração.
 
 **Estado:** interface Desktop implementada e testada em mocks; **não instalada nem homologada no Windows/CT221 de produção**.
 

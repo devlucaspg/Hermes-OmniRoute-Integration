@@ -7,12 +7,14 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import http.client
+import logging
 import re
 import threading
 import time
 from urllib import error, parse, request
 
-VERSION = '0.3.2-beta.1'
+VERSION = '0.4.0-beta.2'
 
 
 class OmniError(RuntimeError):
@@ -158,6 +160,99 @@ def data_items(response: dict) -> list[dict]:
     return [row for row in value if isinstance(row, dict)] if isinstance(value, list) else []
 
 
+# Kept identical in the independently installable provider, backend and dashboard.
+# The dashboard is loaded directly by Hermes, outside the backend package.
+class CatalogError(RuntimeError):
+    pass
+
+
+def _is_chat(row):
+    if not isinstance(row, dict) or not isinstance(row.get('id'), str) or not row['id'].strip():
+        return False
+    category = str(row.get('type') or '').strip().lower()
+    subtype = str(row.get('subtype') or '').strip().lower()
+    non_chat = {'audio', 'speech', 'tts', 'transcription', 'stt', 'audio-speech',
+                'audio-transcriptions', 'embedding', 'embeddings', 'image', 'images',
+                'video', 'music', 'rerank', 'moderation'}
+    # Explicit chat subtypes (e.g. reasoning) are valid. Untyped legacy entries
+    # remain compatible, but an untyped entry with an unknown subtype is ambiguous.
+    return (category in {'chat', 'text', 'language', 'llm', 'combo', ''}
+            and subtype not in non_chat and (bool(category) or not subtype))
+
+
+def _fetch_catalog(root, key, opener, timeout=20.0, path='/models'):
+    """Retrieve every authorized page, never report a partial catalog as success."""
+    if not key or any(ord(c) < 32 or ord(c) == 127 for c in key):
+        raise CatalogError('Invalid OmniRoute API key')
+    if path not in {'/models', '/images/generations', '/videos/generations'}:
+        raise CatalogError('Invalid catalog endpoint')
+    page_size = 200
+    max_bytes = 4 * 1024 * 1024
+    cursor = None
+    seen = set()
+    rows = []
+    total_bytes = 0
+    deadline = time.monotonic() + 180
+    for _ in range(1000):
+        # Only internally constructed query parameters; never follow a server URL.
+        # kind=chat matches only literal chat (or untyped) and can omit combos.
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise CatalogError('OmniRoute catalog discovery exceeded its time budget')
+            query = [('prefix', 'alias'), ('limit', str(page_size))]
+            if cursor is not None:
+                query.append(('after', cursor))
+            url = root + path
+            if path == '/models':
+                url += '?' + parse.urlencode(query)
+            try:
+                req = request.Request(url, headers={
+                    'Authorization': 'Bearer ' + key, 'Accept': 'application/json',
+                    'User-Agent': 'hermes-omniroute-community/0.4.0-beta.2',
+                })
+                with opener.open(req, timeout=min(timeout, remaining)) as response:
+                    raw = response.read(max_bytes + 1)
+            except error.HTTPError as exc:
+                raise CatalogError(f'OmniRoute catalog HTTP {exc.code}') from None
+            except (error.URLError, TimeoutError, ValueError, OSError, http.client.HTTPException) as exc:
+                raise CatalogError(f'OmniRoute catalog connection failure ({type(exc).__name__})') from None
+            if len(raw) <= max_bytes:
+                break
+            if path != '/models' or page_size == 1:
+                raise CatalogError('OmniRoute catalog page exceeds 4 MiB')
+            page_size = max(1, page_size // 2)
+        total_bytes += len(raw)
+        if total_bytes > 64 * 1024 * 1024:
+            raise CatalogError('OmniRoute catalog exceeded its 64 MiB total safety budget')
+        try:
+            body = json.loads(raw)
+        except (ValueError, UnicodeError):
+            raise CatalogError('OmniRoute catalog returned invalid JSON') from None
+        if not isinstance(body, dict) or body.get('error') or not isinstance(body.get('data'), list):
+            raise CatalogError('OmniRoute catalog returned an invalid envelope')
+        page = body['data']
+        if any(not isinstance(row, dict) for row in page):
+            raise CatalogError('OmniRoute catalog contains an invalid row')
+        rows.extend(page)
+        more = body.get('has_more')
+        if more is None and cursor is None:
+            # Older gateways may return a full unpaged response.
+            return rows
+        if more is False:
+            return rows
+        if more is not True or path != '/models' or not page:
+            raise CatalogError('OmniRoute catalog returned invalid pagination metadata')
+        next_cursor = body.get('last_id')
+        if (not isinstance(next_cursor, str) or not next_cursor or
+                next_cursor != page[-1].get('id') or next_cursor in seen or
+                len(next_cursor) > 4096 or any(ord(c) < 32 or ord(c) == 127 for c in next_cursor)):
+            raise CatalogError('OmniRoute catalog cursor is invalid or repeated')
+        seen.add(next_cursor)
+        cursor = next_cursor
+    raise CatalogError('OmniRoute catalog exceeded its page safety budget')
+
+
 class Catalog:
     def __init__(self):
         self._cached: dict[str, tuple[float, list[dict], tuple[str, str]]] = {}
@@ -167,7 +262,8 @@ class Catalog:
         # Credentials in cache key aren't exposed; only a fingerprint to avoid cross-key reuse.
         import hashlib
         try:
-            identity = (api_base(), hashlib.sha256(api_key().encode()).hexdigest())
+            root, key = api_base(), api_key()
+            identity = (root, hashlib.sha256(key.encode()).hexdigest())
         except OmniError:
             return []
         with self._lock:
@@ -175,12 +271,12 @@ class Catalog:
             if hit and hit[0] > time.monotonic() and hit[2] == identity:
                 return [dict(x) for x in hit[1]]
         try:
-            rows = data_items(call_json('GET', path, timeout=10.0))
-        except OmniError:
-            rows = []
-            ttl = 15
-        else:
-            ttl = 300
+            rows = _fetch_catalog(root, key, _OPENER, path=path)
+        except CatalogError as exc:
+            logging.getLogger(__name__).warning('%s', exc)
+            # Never cache a failed or partial discovery as an empty success.
+            return []
+        ttl = 60
         with self._lock:
             self._cached[path] = (time.monotonic() + ttl, rows, identity)
         return [dict(x) for x in rows]
@@ -197,16 +293,7 @@ def model_id(explicit: str | None, env_name: str, category: str) -> str:
 
 
 def is_chat_model(row: dict) -> bool:
-    """Honor OmniRoute's `type` taxonomy, including combos with missing type.
-
-    A missing type is treated as chat for backward compatibility with OpenAI
-    catalogs; explicit embedding/media/rerank models must never enter the LLM
-    selector. Audio `subtype` is also checked for malformed third-party rows.
-    """
-    if not isinstance(row.get('id'), str) or not row['id'].strip():
-        return False
-    category = str(row.get('type') or 'chat').strip().lower()
-    return category in {'chat', 'text', 'language', 'llm', 'combo'} and not row.get('subtype')
+    return _is_chat(row)
 
 
 def _is_modality(row: dict, kind: str) -> bool:
@@ -242,9 +329,7 @@ def model_entries(kind: str) -> list[dict]:
                     not x['input_modalities'] or 'text' in x['input_modalities'])]
             return [x for x in rows if isinstance(x.get('id'), str)]
     if kind == 'chat':
-        # Filter at OmniRoute BEFORE paging/aliases, then defensively filter
-        # again in case a compatible gateway ignores unknown query params.
-        return [x for x in catalog.get('/models?kind=chat&prefix=alias') if is_chat_model(x)]
+        return [x for x in catalog.get('/models') if is_chat_model(x)]
     return [x for x in catalog.get('/models') if isinstance(x.get('id'), str) and
             _is_modality(x, kind)]
 
