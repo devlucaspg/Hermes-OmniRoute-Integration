@@ -24,6 +24,18 @@ const PREFERENCES = Object.freeze([
   ['fetch_provider', 'Provedor de extração web (opcional)'],
 ])
 
+// Only the route prefix is authoritative here: the native picker supplies
+// IDs, not OmniRoute's owned_by/root metadata. Never guess a vendor for a bare
+// ID or replace a routing ID with a display label.
+function decorateOmniRouteRow(row) {
+  if (!row || !['omniroute', 'omni-route'].includes(String(row.provider || '').toLowerCase())) return null
+  if (typeof row.model !== 'string' || !row.model.trim()) return null
+  const id = row.model
+  const slash = id.indexOf('/')
+  const prefix = slash > 0 ? id.slice(0, slash) : ''
+  return { badge: prefix || 'Sem prefixo' }
+}
+
 function errorText(error) {
   // Never show raw remote error bodies or echo arbitrary values from the server.
   const status = Number(error?.status ?? error?.statusCode ?? 0)
@@ -149,7 +161,10 @@ function OmniRouteSettings({ rest }) {
       if (!response || !Array.isArray(response.models)) throw new Error('Invalid models payload')
       const rows = response.models
         .filter(item => item && typeof item.id === 'string' && item.id.length <= 256)
-        .map(item => ({ id: item.id, label: String(item.label || item.id).slice(0, 256) }))
+        .map(item => ({
+          id: item.id,
+          label: typeof item.route_label === 'string' && item.route_label ? item.route_label : item.id,
+        }))
       setCatalogs(previous => ({ ...previous, [kind]: rows }))
       const info = response.diagnostics
       const counts = info && info.classified
@@ -320,6 +335,15 @@ export default {
     // Keep the SDK context as the call receiver; the wrapper is stable
     // across page re-renders so the initial GET effect runs only once.
     const scopedRest = (path, options) => ctx.rest(path, options)
+    // Official SDK contribution: only a textual badge, no DOM patching.
+    // Older Desktop versions simply retain the native unadorned menu.
+    if (typeof sdk.MODEL_MENU_ROW_AREA === 'string') {
+      ctx.register({
+        id: 'omniroute-origin',
+        area: sdk.MODEL_MENU_ROW_AREA,
+        data: { decorate: decorateOmniRouteRow },
+      })
+    }
     const page = {
       id: 'settings',
       title: 'OmniRoute',

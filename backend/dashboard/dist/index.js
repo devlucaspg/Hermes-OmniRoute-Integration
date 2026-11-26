@@ -71,7 +71,7 @@
           ),
           catalogs[kind] && h('select',{className:'w-full p-2 rounded border',value:'',onChange:function(e){var v=e.target.value;setSelections(function(s){return Object.assign({},s,{[kind]:v});});}},
             h('option', {value:''}, 'Select a discovered model (' + catalogs[kind].length + ')'),
-            catalogs[kind].map(function(m){return h('option', {value:m.id,key:m.id}, m.label);})
+            catalogs[kind].map(function(m){return h('option', {value:m.id,key:m.id}, m.route_label || m.id);})
           )
         );}) )
       ),

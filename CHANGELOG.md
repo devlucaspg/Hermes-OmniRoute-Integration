@@ -9,6 +9,7 @@
 - Centralize catalog discovery in one maintained backend source; generate and verify an identical standalone provider copy.
 - Expose sanitized, structured catalog diagnostics in both plugin UIs and native/backend logs, including API/cache origin and delivered counts.
 - Regenerate and verify the tracked-source SHA-256 manifest in CI.
+- Add route-prefix badges to native Desktop model picker rows via the official SDK; expose exact routing labels and source metadata in plugin settings without rewriting inference IDs.
 - Candidate release; live deployment and official validator results must be checked separately.
 
 ## 0.4.0-beta.1 — Native Hermes Desktop settings

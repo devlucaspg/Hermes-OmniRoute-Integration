@@ -100,3 +100,7 @@ No Hermes Desktop, desabilite o plugin em Capabilities → Plugins. Para remover
 - O recurso de `ctx.rest` depende da versão do Hermes Desktop, do gateway e do perfil habilitado. A interface não ignora restrições de autenticação.
 - Em versões antigas, `registerSettingsPage` pode não existir: há fallback para `SETTINGS_PLUGINS_AREA`, cuja disponibilidade também deve ser confirmada na instalação real.
 - Um plugin Desktop pode ter amplos privilégios de renderer; instale apenas fonte revisada e utilize o carregador oficial. Este código não chama APIs privilegiadas do Electron nem acessa arquivos locais.
+
+### Origem dos modelos no seletor nativo
+
+A contribuição oficial `MODEL_MENU_ROW_AREA` acrescenta uma etiqueta com o primeiro segmento do ID às linhas OmniRoute, por exemplo `openrouter` em `openrouter/nvidia/nemotron`. Não modifica o título nativo, o ID de inferência ou outros provedores. IDs sem barra exibem `Sem prefixo`; o catálogo próprio, que recebe `owned_by`, distingue combos e mostra o ID roteável completo. Em versões do Desktop sem esse hook, o seletor próprio permanece funcional. Após atualizar o JS local, use Rescan e reabra o menu.

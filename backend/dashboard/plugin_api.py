@@ -210,7 +210,19 @@ def models(kind: str = 'chat'):
         log_diagnostics(logging.getLogger(__name__), details)
         raise HTTPException(status_code=502, detail=str(exc)) from None
     selected = select_rows(rows, kind, path)
-    result = [{'id': row['id'], 'label': str(row.get('name') or row['id'])} for row in selected]
+    # Keep the exact inference ID; the route label is display-only. The
+    # first segment of a namespaced ID is the OmniRoute routing alias, not
+    # necessarily the upstream manufacturer's name.
+    result = []
+    for row in selected:
+        model_id = row['id']
+        owner = row.get('owned_by') if isinstance(row.get('owned_by'), str) else ''
+        source_root = row.get('root') if isinstance(row.get('root'), str) else ''
+        if not owner and row.get('type') == 'combo':
+            owner = 'combo'
+        route_label = model_id if '/' in model_id or not owner else owner + '/' + model_id
+        result.append({'id': model_id, 'label': str(row.get('name') or model_id),
+                       'route_label': route_label, 'owned_by': owner, 'root': source_root})
     details = catalog_diagnostics(rows, kind, path, stats=stats, delivered=len(result))
     log_diagnostics(logging.getLogger(__name__), details)
     return {'models': result, 'kind': kind, 'diagnostics': details}

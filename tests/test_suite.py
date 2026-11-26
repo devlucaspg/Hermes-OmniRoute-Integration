@@ -278,6 +278,18 @@ class ExtendedSafetyTests(unittest.TestCase):
                 response = m.models('chat')
                 listed = response['models']
             self.assertEqual(len(listed), 1207)
+            combo = next(x for x in listed if x['id'] == 'combo/default')
+            self.assertEqual(combo['route_label'], 'combo/default')
+            with patch.object(m, '_fetch_catalog', return_value=[
+                    {'id':'openrouter/nvidia/nemotron','owned_by':'openrouter',
+                     'root':'nvidia/nemotron','name':'Nemotron'},
+                    {'id':'Combo-1','owned_by':'combo','root':'Combo-1'},
+                    {'id':'custom-bare'}]):
+                labels = m.models('chat')['models']
+            self.assertEqual([(x['id'], x['route_label'], x['owned_by'], x['root']) for x in labels], [
+                ('openrouter/nvidia/nemotron','openrouter/nvidia/nemotron','openrouter','nvidia/nemotron'),
+                ('Combo-1','combo/Combo-1','combo','Combo-1'),
+                ('custom-bare','custom-bare','','')])
             stats = response['diagnostics']
             self.assertEqual(stats['received'], 1209)
             self.assertEqual(stats['classified']['chat'], 1208)
